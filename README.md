@@ -84,7 +84,7 @@ Mock mode does not call real Codex CLI.
 Below-90 branch:
 
 ```bash
-python src/main.py --input input/business_input.yaml --mock-codex --mock-ai-score 80
+python src/main.py --input input/business_input.yaml --mock-codex --mock-ai-score 60
 ```
 
 Above-90 branch:
