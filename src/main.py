@@ -14,6 +14,7 @@ from output_writer import (
     write_json,
     write_text,
     write_validation_errors,
+    write_validation_errors_markdown,
 )
 from prompt_writer import pretty_json, write_prompt
 from response_parser import parse_json_response, validate_generation_response, validate_semantic_review
@@ -72,7 +73,8 @@ def main():
         validation_result = validate_required_fields(data)
         if not validation_result["is_valid"]:
             write_validation_errors(output_dir, validation_result)
-            print("Validation failed. See output/validation_errors.json for details.", file=sys.stderr)
+            write_validation_errors_markdown(output_dir, validation_result)
+            print("Validation failed. See output/validation_errors.json and output/validation_errors.md for details.", file=sys.stderr)
             return 1
 
         write_json(output_dir / "input.json", data)

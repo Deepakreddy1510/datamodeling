@@ -14,6 +14,7 @@ KNOWN_GENERATED_FILES = [
     "codex_generation_response.json",
     "final_output.md",
     "validation_errors.json",
+    "validation_errors.md",
     "error.json",
 ]
 
@@ -45,6 +46,31 @@ def write_validation_errors(output_dir, validation_result):
         "status": "validation_failed",
         "errors": validation_result["errors"],
     })
+
+
+def write_validation_errors_markdown(output_dir, validation_result):
+    lines = [
+        "# Validation Errors",
+        "",
+        "The input YAML is incomplete. Please fix the following fields before running the accelerator again.",
+        "",
+        "| Field | Issue |",
+        "|---|---|",
+    ]
+    for error in validation_result["errors"]:
+        lines.append(f"| {error.get('field', '')} | {error.get('message', '')} |")
+    lines.extend([
+        "",
+        "## Next Step",
+        "",
+        "Update the input YAML file and run:",
+        "",
+        "```bash",
+        "python src/main.py --input input/business_input.yaml",
+        "```",
+        "",
+    ])
+    write_text(Path(output_dir) / "validation_errors.md", "\n".join(lines))
 
 
 def write_error(output_dir, message):

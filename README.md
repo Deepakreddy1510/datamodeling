@@ -127,6 +127,7 @@ Created as applicable under `output/`:
 - `codex_generation_response.json`
 - `final_output.md`
 - `validation_errors.json`
+- `validation_errors.md`
 - `error.json`
 
 ## Scoring Formula
@@ -162,12 +163,21 @@ If Codex does not return this section, Python appends:
 No AI additions section was returned by Codex.
 ```
 
+## Negative Validation Test
+
+If required fields are missing, the pipeline stops before Codex execution and writes both:
+
+- `output/validation_errors.json`
+- `output/validation_errors.md`
+
+The Markdown file is intended for human-readable review and includes the invalid fields, issues, and next step command.
+
 ## Troubleshooting
 
 - Missing input file: copy the sample YAML to `input/business_input.yaml`.
 - Empty YAML file: add required business fields.
 - Invalid YAML syntax: fix indentation and YAML formatting.
-- Missing required fields: inspect `output/validation_errors.json`.
+- Missing required fields: inspect `output/validation_errors.json` and `output/validation_errors.md`.
 - Codex CLI not installed/authenticated: install and authenticate Codex CLI before real mode.
 - Codex CLI non-zero exit: inspect terminal stderr and `output/error.json`.
 - Invalid Codex JSON: raw output is saved before parsing for debugging.
