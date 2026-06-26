@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# AI Data Model Accelerator generated/local files
+output/
+input/business_input.yaml
+.DS_Store
