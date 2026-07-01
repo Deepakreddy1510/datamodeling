@@ -1,1 +1,6 @@
 pyyaml
+python-dotenv
+psycopg[binary]
+openpyxl
+Faker
+sqlparse

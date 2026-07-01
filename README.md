@@ -181,3 +181,63 @@ The Markdown file is intended for human-readable review and includes the invalid
 - Codex CLI not installed/authenticated: install and authenticate Codex CLI before real mode.
 - Codex CLI non-zero exit: inspect terminal stderr and `output/error.json`.
 - Invalid Codex JSON: raw output is saved before parsing for debugging.
+
+## Phase 2 Synthetic Data and PostgreSQL Load
+
+Phase 2 is a separate command that runs after Phase 1 has generated a data model markdown file. It reads the business YAML and the Phase 1 output, extracts PostgreSQL DDL, generates safe synthetic data, writes the same generated data to Excel, and optionally loads it into PostgreSQL.
+
+Phase 2 does **not** change or replace the existing Phase 1 command. A combined Phase 1 + Phase 2 command can be added later after Phase 2 is stable.
+
+### Phase 2 Dry Run
+
+Dry run generates Excel and markdown reports, but does not connect to PostgreSQL:
+
+```bash
+python src/phase2_runner.py --yaml input/business_input.yaml --phase1-output output/final_output.md --rows-per-table 100 --excel-output output/synthetic_data_output.xlsx --no-load-to-postgres
+```
+
+If `output/final_output.md` is missing and no explicit Phase 1 output path is supplied, Phase 2 falls back to `output/output.md`.
+
+### Phase 2 PostgreSQL Load
+
+```bash
+python src/phase2_runner.py --yaml input/business_input.yaml --phase1-output output/final_output.md --rows-per-table 100 --excel-output output/synthetic_data_output.xlsx --load-to-postgres --create-schema-if-missing --create-tables-if-missing
+```
+
+### Required PostgreSQL Environment Variables
+
+Use environment variables or a local `.env` file. Do not hardcode database credentials.
+
+```text
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=datamodeling
+POSTGRES_USER=your_user
+POSTGRES_PASSWORD=your_password
+POSTGRES_TARGET_SCHEMA=your_approved_schema
+POSTGRES_SSLMODE=prefer
+```
+
+`POSTGRES_SSLMODE` is optional and defaults to `prefer`.
+
+### Phase 2 Output Files
+
+Created under `output/` by default:
+
+- `synthetic_data_output.xlsx`
+- `synthetic_data_generation_report.md`
+- `postgres_load_report.md`
+- `validation_report.md`
+
+### Phase 2 Safety Notes
+
+- PostgreSQL loading only happens when `--load-to-postgres` is passed.
+- Phase 2 refuses to load into the `public` schema.
+- `POSTGRES_TARGET_SCHEMA` is required for PostgreSQL loading.
+- Phase 2 does not drop tables.
+- Phase 2 does not truncate tables unless `--truncate-before-load` is explicitly passed.
+- Phase 2 does not insert into non-empty tables unless `--allow-insert-into-nonempty-tables` is passed.
+- Phase 2 does not create schemas unless `--create-schema-if-missing` is passed.
+- Phase 2 does not create tables unless `--create-tables-if-missing` is passed.
+- PostgreSQL loads use transactions and roll back on failure.
+- Generated data is fake synthetic data only.
