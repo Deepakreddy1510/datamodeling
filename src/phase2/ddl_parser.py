@@ -75,6 +75,12 @@ def _parse_table_constraint(part, table):
         _, parent_table = _split_qualified_name(fk_match.group(2))
         table.foreign_keys.append(ForeignKey(table.name, _parse_column_list(fk_match.group(1)), parent_table, _parse_column_list(fk_match.group(3))))
         return
+    unique_match = re.search(r"UNIQUE\s*\(([^)]+)\)", text, re.IGNORECASE)
+    if unique_match:
+        # Phase 2 MVP recognizes table-level UNIQUE constraints so they are not
+        # misclassified as columns. Unique constraint enforcement beyond primary
+        # key uniqueness can be added later if needed.
+        return
     raise DDLParserError(f"Unsupported table constraint: {part}")
 
 
@@ -124,7 +130,7 @@ def parse_ddl(ddl_text):
             table = Table(name=table_name, schema=schema)
             for part in _split_top_level_commas(table_match.group(2)):
                 normalized = part.strip()
-                if re.match(r"^(CONSTRAINT\s+[\w\"]+\s+)?(PRIMARY\s+KEY|FOREIGN\s+KEY)\b", normalized, re.IGNORECASE):
+                if re.match(r"^(CONSTRAINT\s+[\w\"]+\s+)?(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE)\b", normalized, re.IGNORECASE):
                     _parse_table_constraint(normalized, table)
                 else:
                     _parse_column(normalized, table)
