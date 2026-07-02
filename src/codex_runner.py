@@ -17,27 +17,32 @@ def resolve_codex_executable():
 
 class CodexCLIClient:
     def run_prompt(self, prompt_text):
-        executable = resolve_codex_executable()
         try:
             result = subprocess.run(
-                [executable, "exec", "-"],
+                ["codex", "exec", "-"],
                 input=prompt_text,
                 capture_output=True,
                 text=True,
                 check=True,
             )
         except FileNotFoundError as exc:
-            raise CodexRunnerError("Codex CLI executable was not found in PATH. Try running codex --version in the same terminal.") from exc
+            raise CodexRunnerError("Codex CLI must be installed and authenticated before running this pipeline.") from exc
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").strip()
+            stdout = (exc.stdout or "").strip()
             message = "Codex CLI returned a non-zero exit code."
+
             if stderr:
                 message += f" stderr: {stderr}"
+            if stdout:
+                message += f" stdout: {stdout}"
+
             raise CodexRunnerError(message) from exc
 
         stdout = result.stdout.strip()
         if not stdout:
             raise CodexRunnerError("Codex CLI returned empty stdout.")
+
         return stdout
 
 
