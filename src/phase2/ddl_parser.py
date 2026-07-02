@@ -65,7 +65,8 @@ def _parse_references(text):
 
 
 def _parse_table_constraint(part, table):
-    text = re.sub(r"^CONSTRAINT\s+[\w\"]+\s+", "", part.strip(), flags=re.IGNORECASE)
+    original = part.strip()
+    text = re.sub(r"^CONSTRAINT\s+[\w\"]+\s+", "", original, flags=re.IGNORECASE)
     pk_match = re.search(r"PRIMARY\s+KEY\s*\(([^)]+)\)", text, re.IGNORECASE)
     if pk_match:
         table.primary_key = _parse_column_list(pk_match.group(1))
@@ -77,9 +78,17 @@ def _parse_table_constraint(part, table):
         return
     unique_match = re.search(r"UNIQUE\s*\(([^)]+)\)", text, re.IGNORECASE)
     if unique_match:
-        # Phase 2 MVP recognizes table-level UNIQUE constraints so they are not
-        # misclassified as columns. Unique constraint enforcement beyond primary
-        # key uniqueness can be added later if needed.
+        table.ignored_constraints.append(f"UNIQUE: {original}")
+        table.warnings.append("UNIQUE constraint recognized but not enforced by Phase 2 MVP synthetic data generation.")
+        return
+    check_match = re.search(r"CHECK\s*\(", text, re.IGNORECASE)
+    if check_match:
+        table.ignored_constraints.append(f"CHECK: {original}")
+        table.warnings.append("CHECK constraint recognized but not enforced by Phase 2 MVP synthetic data generation.")
+        return
+    if re.match(r"^CONSTRAINT\b", original, re.IGNORECASE):
+        table.ignored_constraints.append(f"UNSUPPORTED: {original}")
+        table.warnings.append(f"Unsupported table constraint ignored safely: {original}")
         return
     raise DDLParserError(f"Unsupported table constraint: {part}")
 
@@ -95,11 +104,14 @@ def _parse_column(part, table):
         raise DDLParserError(f"Unsupported data type for column {name}: {rest}")
     data_type = type_match.group(0).strip()
     constraints = rest[type_match.end():]
+    length_match = re.match(r"^(?:varchar|character\s+varying)\s*\((\d+)\)", data_type, re.IGNORECASE)
+    max_length = int(length_match.group(1)) if length_match else None
     column = Column(
         name=name,
         data_type=data_type,
         nullable=not re.search(r"\bNOT\s+NULL\b", constraints, re.IGNORECASE),
         is_primary_key=bool(re.search(r"\bPRIMARY\s+KEY\b", constraints, re.IGNORECASE)),
+        max_length=max_length,
     )
     ref_match = re.search(r"\bREFERENCES\b", constraints, re.IGNORECASE)
     if ref_match:
@@ -130,7 +142,7 @@ def parse_ddl(ddl_text):
             table = Table(name=table_name, schema=schema)
             for part in _split_top_level_commas(table_match.group(2)):
                 normalized = part.strip()
-                if re.match(r"^(CONSTRAINT\s+[\w\"]+\s+)?(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE)\b", normalized, re.IGNORECASE):
+                if re.match(r"^CONSTRAINT\b|^(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK)\b", normalized, re.IGNORECASE):
                     _parse_table_constraint(normalized, table)
                 else:
                     _parse_column(normalized, table)
@@ -140,6 +152,7 @@ def parse_ddl(ddl_text):
                     column.nullable = False
             if not table.columns:
                 raise DDLParserError(f"CREATE TABLE {table.full_name} has no columns.")
+            model.warnings.extend(table.warnings)
             model.tables.append(table)
             continue
 

@@ -49,3 +49,45 @@ CREATE TABLE product_listing (
     assert table.column_names() == ["product_listing_id", "sku_code", "asin"]
     assert "CONSTRAINT" not in table.column_names()
     assert "UNIQUE" not in table.column_names()
+
+
+def test_parse_table_level_check_constraint_is_not_column():
+    model = parse_ddl("""
+CREATE TABLE audit_load (
+  audit_load_id integer PRIMARY KEY,
+  load_status varchar(30) NOT NULL,
+  CHECK (load_status IN ('started','completed','failed','validated'))
+);
+""")
+    table = model.tables[0]
+    assert table.column_names() == ["audit_load_id", "load_status"]
+    assert "CHECK" not in table.column_names()
+    assert table.ignored_constraints
+
+
+def test_parse_named_check_constraint_is_not_column():
+    model = parse_ddl("""
+CREATE TABLE audit_load (
+  audit_load_id integer PRIMARY KEY,
+  load_status varchar(30) NOT NULL,
+  CONSTRAINT ck_audit_load_status CHECK (load_status IN ('started','completed','failed','validated'))
+);
+""")
+    table = model.tables[0]
+    assert table.column_names() == ["audit_load_id", "load_status"]
+    assert "CONSTRAINT" not in table.column_names()
+    assert "CHECK" not in table.column_names()
+    assert table.ignored_constraints
+
+
+def test_parse_varchar_and_character_varying_lengths():
+    model = parse_ddl("""
+CREATE TABLE length_test (
+  id integer PRIMARY KEY,
+  short_name varchar(30),
+  campaign_name CHARACTER VARYING(20)
+);
+""")
+    columns = {column.name: column for column in model.tables[0].columns}
+    assert columns["short_name"].max_length == 30
+    assert columns["campaign_name"].max_length == 20

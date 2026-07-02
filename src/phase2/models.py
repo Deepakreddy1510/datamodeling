@@ -9,6 +9,7 @@ class Column:
     is_primary_key: bool = False
     references_table: str | None = None
     references_column: str | None = None
+    max_length: int | None = None
 
 
 @dataclass
@@ -26,6 +27,8 @@ class Table:
     columns: list[Column] = field(default_factory=list)
     primary_key: list[str] = field(default_factory=list)
     foreign_keys: list[ForeignKey] = field(default_factory=list)
+    ignored_constraints: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def full_name(self):
@@ -39,6 +42,7 @@ class Table:
 class DDLModel:
     schemas: list[str] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def table_map(self):
         mapping = {}

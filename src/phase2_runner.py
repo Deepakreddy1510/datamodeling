@@ -64,6 +64,7 @@ def main():
         model = parse_ddl(ddl_text)
         data = generate_synthetic_data(model, args.rows_per_table, args.seed)
         pre_validation = validate_generated_data(model, data, args.rows_per_table)
+        pre_validation["generation_stats"] = data.get("__stats__", {})
         write_excel(model, data, args.excel_output)
         write_generation_report(
             output_dir / "synthetic_data_generation_report.md",
@@ -75,7 +76,7 @@ def main():
             excel_output=args.excel_output,
             validation=pre_validation,
         )
-        if pre_validation["status"] != "passed":
+        if pre_validation["status"] == "failed":
             write_postgres_report(output_dir / "postgres_load_report.md", False, {})
             write_validation_report(output_dir / "validation_report.md", pre_validation)
             print("Phase 2 failed pre-load validation. See output/validation_report.md.", file=sys.stderr)

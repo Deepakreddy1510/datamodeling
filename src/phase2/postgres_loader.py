@@ -66,14 +66,19 @@ def load_to_postgres(model, data, *, create_schema_if_missing=False, create_tabl
     cfg = {}
     inserted = {}
     errors = []
+    schema_status = "not_attempted"
+    table_status = "not_attempted"
+    transaction_status = "not_started"
     try:
         cfg = load_env()
         with psycopg.connect(host=cfg["host"], port=cfg["port"], dbname=cfg["dbname"], user=cfg["user"], password=cfg["password"], sslmode=cfg["sslmode"]) as conn:
             try:
                 if create_schema_if_missing:
                     conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(cfg["target_schema"])))
+                    schema_status = "created_or_already_exists"
                 else:
                     exists = conn.execute("SELECT 1 FROM information_schema.schemata WHERE schema_name = %s", [cfg["target_schema"]]).fetchone()
+                    schema_status = "exists" if exists else "missing"
                     if not exists:
                         raise PostgresLoadError(f"Target schema {cfg['target_schema']} does not exist. Use --create-schema-if-missing to create it.")
 
@@ -85,6 +90,7 @@ def load_to_postgres(model, data, *, create_schema_if_missing=False, create_tabl
                     if not exists:
                         if create_tables_if_missing:
                             _create_table(conn, table, cfg["target_schema"])
+                            table_status = "created_missing_tables"
                         else:
                             raise PostgresLoadError(f"Table {cfg['target_schema']}.{table.name} does not exist. Use --create-tables-if-missing to create it.")
                     count = conn.execute(
@@ -92,9 +98,12 @@ def load_to_postgres(model, data, *, create_schema_if_missing=False, create_tabl
                     ).fetchone()[0]
                     if count and not truncate_before_load and not allow_insert_into_nonempty_tables:
                         raise PostgresLoadError(f"Table {cfg['target_schema']}.{table.name} is non-empty. Use --allow-insert-into-nonempty-tables or --truncate-before-load.")
+                    if exists and table_status == "not_attempted":
+                        table_status = "all_tables_exist"
                     if truncate_before_load:
                         conn.execute(sql.SQL("TRUNCATE TABLE {}.{} CASCADE").format(sql.Identifier(cfg["target_schema"]), sql.Identifier(table.name)))
 
+                transaction_status = "in_progress"
                 for table in model.tables:
                     columns = table.column_names()
                     insert = sql.SQL("INSERT INTO {}.{} ({}) VALUES ({})").format(
@@ -108,13 +117,16 @@ def load_to_postgres(model, data, *, create_schema_if_missing=False, create_tabl
                         cur.executemany(insert, values)
                     inserted[table.name] = len(values)
                 conn.commit()
+                transaction_status = "committed"
             except Exception:
                 conn.rollback()
+                inserted = {}
+                transaction_status = "rolled_back"
                 raise
     except Exception as exc:
         errors.append(str(exc))
-        return {"status": "failed", "target_schema": cfg.get("target_schema", ""), "inserted_rows": inserted, "errors": errors}
-    return {"status": "passed", "target_schema": cfg["target_schema"], "inserted_rows": inserted, "errors": []}
+        return {"status": "failed", "target_schema": cfg.get("target_schema", ""), "inserted_rows": inserted, "errors": errors, "schema_creation_status": schema_status, "table_creation_status": table_status, "transaction_status": transaction_status}
+    return {"status": "passed", "target_schema": cfg["target_schema"], "inserted_rows": inserted, "errors": [], "schema_creation_status": schema_status, "table_creation_status": table_status, "transaction_status": transaction_status}
 
 
 def validate_postgres_load(model, expected_counts):

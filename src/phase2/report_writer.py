@@ -6,21 +6,54 @@ def write_text(path, lines):
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _overall_status(*statuses):
+    if any(status == "failed" for status in statuses if status):
+        return "failed"
+    if any(status == "passed_with_warnings" for status in statuses if status):
+        return "passed_with_warnings"
+    return "passed"
+
+
 def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation):
+    stats = validation.get("generation_stats", {})
+    final_status = _overall_status(validation.get("status"), "passed_with_warnings" if getattr(model, "warnings", []) else None)
     lines = [
         "# Synthetic Data Generation Report", "",
+        f"- Final status: **{final_status}**",
         f"- YAML input: `{yaml_path}`",
         f"- Phase 1 output: `{phase1_output}`",
         f"- Excel output: `{excel_output}`",
         f"- Rows per table: {rows_per_table}", "",
-        "## DDL Extraction", "",
-        f"- Extracted DDL characters: {len(ddl_text)}", "",
+        "## DDL Extraction Summary", "",
+        f"- Extracted DDL characters: {len(ddl_text)}",
+        f"- Tables parsed: {len(model.tables)}", "",
         "## Parsed Tables", "",
         "| Table | Columns | Primary Key | Foreign Keys |",
         "|---|---:|---|---:|",
     ]
     for table in model.tables:
         lines.append(f"| {table.full_name} | {len(table.columns)} | {', '.join(table.primary_key) or 'None'} | {len(table.foreign_keys)} |")
+
+    lines.extend(["", "## Ignored Constraints / Warnings", ""])
+    ignored = []
+    for table in model.tables:
+        ignored.extend([f"{table.full_name}: {constraint}" for constraint in table.ignored_constraints])
+    lines.extend([f"- {item}" for item in ignored] or ["- None"])
+    if getattr(model, "warnings", []):
+        lines.extend(["", "### Parser Warnings", ""])
+        lines.extend([f"- {warning}" for warning in model.warnings])
+
+    lines.extend(["", "## Column Length Rules", ""])
+    lines.extend([f"- {item}" for item in validation.get("length_checks", [])] or ["- No varchar length limits parsed."])
+    lines.append(f"- Generated-short/truncated value count: {stats.get('truncated_values', 0)}")
+
+    lines.extend(["", "## Foreign Key Relationships", "", "### Parsed", ""])
+    lines.extend([f"- {item}" for item in validation.get("parsed_fk_relationships", [])] or ["- None"])
+    lines.extend(["", "### Validated", ""])
+    lines.extend([f"- {item}" for item in validation.get("checked_fk_relationships", [])] or ["- None"])
+    lines.extend(["", "### FK-like Columns Skipped Because No FK Exists in DDL", ""])
+    lines.extend([f"- {item}" for item in validation.get("skipped_fk_like_columns", [])] or ["- None"])
+
     lines.extend(["", "## Pre-load Validation", "", f"Status: **{validation['status']}**", ""])
     lines.extend([f"- {error}" for error in validation.get("errors", [])] or ["- No validation errors."])
     write_text(path, lines)
@@ -32,8 +65,11 @@ def write_postgres_report(path, load_requested, result):
         lines.append("PostgreSQL load was skipped because `--no-load-to-postgres` was used or `--load-to-postgres` was not passed.")
     else:
         lines.extend([
-            f"- Status: **{result.get('status', 'unknown')}**",
+            f"- Final status: **{result.get('status', 'unknown')}**",
             f"- Target schema: `{result.get('target_schema', '')}`",
+            f"- Schema creation status: {result.get('schema_creation_status', 'not_attempted')}",
+            f"- Table creation status: {result.get('table_creation_status', 'not_attempted')}",
+            f"- Transaction status: {result.get('transaction_status', 'unknown')}",
             "", "## Inserted Rows", "", "| Table | Rows Inserted |", "|---|---:|",
         ])
         for table, count in result.get("inserted_rows", {}).items():
@@ -45,8 +81,15 @@ def write_postgres_report(path, load_requested, result):
 
 
 def write_validation_report(path, pre_validation, post_validation=None):
-    lines = ["# Validation Report", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
+    final_status = _overall_status(pre_validation.get("status"), post_validation.get("status") if post_validation else None)
+    lines = ["# Validation Report", "", f"- Final status: **{final_status}**", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
     lines.extend([f"- {error}" for error in pre_validation.get("errors", [])] or ["- No validation errors."])
+    lines.extend(["", "## FK Validation Coverage", "", "### Parsed FK Relationships", ""])
+    lines.extend([f"- {item}" for item in pre_validation.get("parsed_fk_relationships", [])] or ["- None"])
+    lines.extend(["", "### Checked FK Relationships", ""])
+    lines.extend([f"- {item}" for item in pre_validation.get("checked_fk_relationships", [])] or ["- None"])
+    lines.extend(["", "### FK-like Columns Skipped Because No Parsed FK Exists", ""])
+    lines.extend([f"- {item}" for item in pre_validation.get("skipped_fk_like_columns", [])] or ["- None"])
     lines.extend(["", "## PostgreSQL Validation", ""])
     if post_validation is None:
         lines.append("PostgreSQL validation was skipped because no database load was requested.")
