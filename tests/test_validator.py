@@ -28,3 +28,19 @@ def test_validator_row_count_validation_works():
     result = validate_generated_data(model, data, expected_rows=100)
     assert result["status"] == "failed"
     assert "expected 100 rows" in result["errors"][0]
+
+
+def test_validator_fails_numeric_precision_overflow_before_load():
+    model = parse_ddl("CREATE TABLE t (id integer PRIMARY KEY, amount numeric(5,2));")
+    data = {"t": [{"id": 1, "amount": "1000.00"}]}
+    result = validate_generated_data(model, data, expected_rows=1)
+    assert result["status"] == "failed"
+    assert "numeric(5,2)" in result["errors"][0]
+
+
+def test_validator_fails_numeric_scale_overflow_before_load():
+    model = parse_ddl("CREATE TABLE t (id integer PRIMARY KEY, amount numeric(5,2));")
+    data = {"t": [{"id": 1, "amount": "1.234"}]}
+    result = validate_generated_data(model, data, expected_rows=1)
+    assert result["status"] == "failed"
+    assert "numeric(5,2)" in result["errors"][0]

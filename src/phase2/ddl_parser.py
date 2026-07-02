@@ -106,12 +106,17 @@ def _parse_column(part, table):
     constraints = rest[type_match.end():]
     length_match = re.match(r"^(?:varchar|character\s+varying)\s*\((\d+)\)", data_type, re.IGNORECASE)
     max_length = int(length_match.group(1)) if length_match else None
+    numeric_match = re.match(r"^(?:numeric|decimal)\s*\((\d+)\s*,\s*(\d+)\)", data_type, re.IGNORECASE)
+    numeric_precision = int(numeric_match.group(1)) if numeric_match else None
+    numeric_scale = int(numeric_match.group(2)) if numeric_match else None
     column = Column(
         name=name,
         data_type=data_type,
         nullable=not re.search(r"\bNOT\s+NULL\b", constraints, re.IGNORECASE),
         is_primary_key=bool(re.search(r"\bPRIMARY\s+KEY\b", constraints, re.IGNORECASE)),
         max_length=max_length,
+        numeric_precision=numeric_precision,
+        numeric_scale=numeric_scale,
     )
     ref_match = re.search(r"\bREFERENCES\b", constraints, re.IGNORECASE)
     if ref_match:

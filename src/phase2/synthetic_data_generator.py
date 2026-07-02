@@ -118,6 +118,23 @@ def _short_email(index, column, stats):
     return _bounded(value, column, stats)
 
 
+
+def _numeric_value(rng, column, stats):
+    if column.numeric_precision is not None and column.numeric_scale is not None:
+        integer_digits = max(column.numeric_precision - column.numeric_scale, 0)
+        max_whole = (10 ** integer_digits) - 1 if integer_digits > 0 else 0
+        whole = rng.randint(0, max_whole)
+        if column.numeric_scale > 0:
+            fractional_max = (10 ** column.numeric_scale) - 1
+            fractional = rng.randint(0, fractional_max)
+            value = Decimal(whole) + (Decimal(fractional) / (Decimal(10) ** column.numeric_scale))
+            quantizer = Decimal(1).scaleb(-column.numeric_scale)
+            stats["numeric_bounded_values"] += 1
+            return value.quantize(quantizer)
+        stats["numeric_bounded_values"] += 1
+        return Decimal(whole)
+    return Decimal(f"{rng.randint(1, 999)}.{rng.randint(0, 99):02d}")
+
 def _value_for_column(fake, rng, table, column, index, table_names, stats):
     name = column.name.lower()
     dtype = column.data_type.lower()
@@ -150,10 +167,12 @@ def _value_for_column(fake, rng, table, column, index, table_names, stats):
         return datetime.now().replace(microsecond=0) - timedelta(days=rng.randint(0, 730), seconds=rng.randint(0, 86400))
     if "bool" in dtype:
         return index % 2 == 0
-    if any(token in dtype for token in ["numeric", "decimal", "double", "float"]):
-        return Decimal(f"{rng.randint(1, 9999)}.{rng.randint(0, 99):02d}")
-    if any(word in name for word in ["amount", "price", "cost", "total"]):
-        return Decimal(f"{rng.randint(1, 9999)}.{rng.randint(0, 99):02d}")
+    if any(token in dtype for token in ["numeric", "decimal"]):
+        return _numeric_value(rng, column, stats)
+    if any(word in name for word in ["amount", "price", "cost", "total", "rate", "score", "percentage", "ratio", "value"]):
+        return _numeric_value(rng, column, stats)
+    if any(token in dtype for token in ["double", "float"]):
+        return Decimal(f"{rng.randint(1, 999)}.{rng.randint(0, 99):02d}")
     if any(token in dtype for token in ["int", "serial"]):
         return rng.randint(1, 1000)
     if "uuid" in dtype:
@@ -170,7 +189,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345):
     generated = {}
     table_map = model.table_map()
     table_names = [table.name for table in model.tables]
-    stats = {"truncated_values": 0, "length_limited_columns": []}
+    stats = {"truncated_values": 0, "numeric_bounded_values": 0, "length_limited_columns": []}
 
     for table in table_generation_order(model):
         rows = []

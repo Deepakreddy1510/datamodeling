@@ -47,6 +47,10 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     lines.extend([f"- {item}" for item in validation.get("length_checks", [])] or ["- No varchar length limits parsed."])
     lines.append(f"- Generated-short/truncated value count: {stats.get('truncated_values', 0)}")
 
+    lines.extend(["", "## Numeric Precision / Scale Rules", ""])
+    lines.extend([f"- {item}" for item in validation.get("numeric_checks", [])] or ["- No numeric precision/scale limits parsed."])
+    lines.append(f"- Numeric bounded value count: {stats.get('numeric_bounded_values', 0)}")
+
     lines.extend(["", "## Foreign Key Relationships", "", "### Parsed", ""])
     lines.extend([f"- {item}" for item in validation.get("parsed_fk_relationships", [])] or ["- None"])
     lines.extend(["", "### Validated", ""])

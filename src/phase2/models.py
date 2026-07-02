@@ -10,6 +10,8 @@ class Column:
     references_table: str | None = None
     references_column: str | None = None
     max_length: int | None = None
+    numeric_precision: int | None = None
+    numeric_scale: int | None = None
 
 
 @dataclass

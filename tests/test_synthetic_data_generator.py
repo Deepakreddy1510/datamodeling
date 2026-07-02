@@ -1,3 +1,4 @@
+from decimal import Decimal
 from phase2.ddl_parser import parse_ddl
 from phase2.synthetic_data_generator import generate_synthetic_data
 from phase2.validator import validate_generated_data
@@ -85,3 +86,22 @@ CREATE TABLE fact_session (
     data = generate_synthetic_data(model, rows_per_table=100, seed=1)
     parent_values = {row["device_id"] for row in data["dim_device"]}
     assert all(row["device_id"] in parent_values for row in data["fact_session"])
+
+
+def test_numeric_precision_and_scale_are_respected():
+    model = parse_ddl("""
+CREATE TABLE numeric_values (
+  id integer PRIMARY KEY,
+  amount numeric(5,2),
+  price decimal(6,2),
+  score numeric(3,0)
+);
+""")
+    data = generate_synthetic_data(model, rows_per_table=100, seed=1)
+    for row in data["numeric_values"]:
+        assert row["amount"] <= Decimal("999.99")
+        assert row["price"] <= Decimal("9999.99")
+        assert row["score"] <= Decimal("999")
+        assert abs(row["amount"].as_tuple().exponent) == 2
+        assert abs(row["price"].as_tuple().exponent) == 2
+        assert row["score"].as_tuple().exponent == 0

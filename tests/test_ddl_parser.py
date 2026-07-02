@@ -91,3 +91,18 @@ CREATE TABLE length_test (
     columns = {column.name: column for column in model.tables[0].columns}
     assert columns["short_name"].max_length == 30
     assert columns["campaign_name"].max_length == 20
+
+
+def test_parse_numeric_precision_and_scale():
+    model = parse_ddl("""
+CREATE TABLE numeric_test (
+  id integer PRIMARY KEY,
+  small_amount NUMERIC(5,2),
+  large_amount decimal(10,4)
+);
+""")
+    columns = {column.name: column for column in model.tables[0].columns}
+    assert columns["small_amount"].numeric_precision == 5
+    assert columns["small_amount"].numeric_scale == 2
+    assert columns["large_amount"].numeric_precision == 10
+    assert columns["large_amount"].numeric_scale == 4

@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 
 class Phase2ValidationError(Exception):
     pass
@@ -25,6 +27,7 @@ def validate_generated_data(model, data, expected_rows):
     checked_fks = []
     skipped_fk_like_columns = _fk_like_columns(model)
     length_checks = []
+    numeric_checks = []
 
     for table in model.tables:
         rows = data.get(table.name, [])
@@ -45,6 +48,28 @@ def validate_generated_data(model, data, expected_rows):
                 if too_long:
                     errors.append(
                         f"{table.name}.{column.name}: value exceeds max length {column.max_length} in rows {too_long[:5]}."
+                    )
+            if column.numeric_precision is not None and column.numeric_scale is not None:
+                numeric_checks.append(f"{table.name}.{column.name} numeric({column.numeric_precision},{column.numeric_scale})")
+                integer_digits = column.numeric_precision - column.numeric_scale
+                max_abs_value = Decimal(10) ** integer_digits
+                bad_rows = []
+                for idx, row in enumerate(rows, start=1):
+                    value = row.get(column.name)
+                    if value in (None, ""):
+                        continue
+                    try:
+                        decimal_value = Decimal(str(value))
+                    except (InvalidOperation, ValueError):
+                        bad_rows.append(idx)
+                        continue
+                    exponent = decimal_value.as_tuple().exponent
+                    value_scale = abs(exponent) if exponent < 0 else 0
+                    if abs(decimal_value) >= max_abs_value or value_scale > column.numeric_scale:
+                        bad_rows.append(idx)
+                if bad_rows:
+                    errors.append(
+                        f"{table.name}.{column.name}: value exceeds numeric({column.numeric_precision},{column.numeric_scale}) precision/scale in rows {bad_rows[:5]}."
                     )
         if table.primary_key:
             seen = set()
@@ -71,4 +96,5 @@ def validate_generated_data(model, data, expected_rows):
         "checked_fk_relationships": checked_fks,
         "skipped_fk_like_columns": skipped_fk_like_columns,
         "length_checks": length_checks,
+        "numeric_checks": numeric_checks,
     }
