@@ -83,7 +83,7 @@ class MockCodexClient:
     def run_generation(self, prompt_text):
         response = {
             "status": "generated",
-            "final_output_markdown": "# Business Input Summary\n\nMock generated output.\n\n# AI Additions / Assumptions\n\n| Added Item | Type | Reason | Mandatory / Optional |\n|---|---|---|---|\n| sample_assumption | assumption | Mock generation assumption for testing. | optional |",
+            "final_output_markdown": "# Business Input Summary\n\nMock generated output.\n\n# SQL DDL\n\n```sql\nCREATE TABLE load_customer_raw (customer_id integer PRIMARY KEY);\nCREATE TABLE stg_customer (customer_id integer PRIMARY KEY);\nCREATE TABLE dim_customer (customer_key integer PRIMARY KEY, customer_id integer);\nCREATE TABLE fact_sales (sales_key integer PRIMARY KEY, customer_key integer REFERENCES dim_customer(customer_key), order_total_amount numeric(10,2));\n```\n\n# Fact Grain\n\nfact_sales = one row per order item.\n\n# AI Additions / Assumptions\n\n| Added Item | Type | Reason | Mandatory / Optional |\n|---|---|---|---|\n| sample_assumption | assumption | Mock generation assumption for testing. | optional |",
             "ai_additions_and_assumptions": [
                 {
                     "added_item": "sample_assumption",

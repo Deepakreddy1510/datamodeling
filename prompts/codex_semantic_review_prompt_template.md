@@ -36,6 +36,13 @@ Check all of the following:
 10. Are expected outputs clearly listed?
 11. Are analytics requirements clear if reporting, facts, dimensions, or metrics are requested?
 12. Are there ambiguities that would force AI to guess?
+13. If reporting requirements are present, can facts and dimensions be inferred?
+14. Are business events clear enough to infer fact tables?
+15. Are descriptive entities clear enough to infer dimension tables?
+16. Is target database clear?
+17. Is expected modeling style clear or inferable?
+18. If fact/dimension output is requested, can it be inferred without requiring the user to manually list all fact and dimension tables?
+19. Does the YAML remain business-friendly rather than forcing technical table lists?
 
 ## Scoring Rubric
 
@@ -55,7 +62,7 @@ Do not score above 90 unless reporting requirements are supported.
 Do not score above 90 unless expected outputs are clear.
 Do not score above 90 unless target platform/database is clear.
 If physical model, SQL DDL, schema, or data dictionary are requested, entity attributes are important.
-If analytics outputs are requested, reporting grain, metrics, facts, and dimensions should be evaluated.
+If analytics outputs are requested, reporting grain, metrics, facts, and dimensions should be evaluated. Do not reject business-friendly YAML only because dim_, fact_, stg_, or load_ tables are not explicitly listed.
 If entity attributes are missing, score should usually be below 90 unless expected output is conceptual model only.
 
 ## Required JSON Response

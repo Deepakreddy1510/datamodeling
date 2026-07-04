@@ -5,12 +5,16 @@ from pathlib import Path
 
 from codex_runner import CodexCLIClient, MockCodexClient
 from final_score import calculate_final_score
+from generation_quality_validator import validate_generation_quality
+from model_blueprint_builder import build_model_blueprint
+from model_intent_detector import detect_model_intent
 from output_writer import (
     clean_known_outputs,
     ensure_output_dir,
     write_error,
     write_final_output,
     write_improvement_suggestions,
+    write_generation_quality_report_markdown,
     write_json,
     write_text,
     write_validation_errors,
@@ -104,6 +108,11 @@ def main():
             print("Pipeline completed: input needs improvement. See output/improvement_suggestions.md.")
             return 0
 
+        model_intent = detect_model_intent(data)
+        write_json(output_dir / "model_intent.json", model_intent)
+        model_blueprint = build_model_blueprint(data, model_intent)
+        write_json(output_dir / "model_blueprint.json", model_blueprint)
+
         generation_prompt = write_prompt(
             GENERATION_TEMPLATE,
             output_dir / "codex_generation_prompt.md",
@@ -111,12 +120,20 @@ def main():
                 "canonical_json": pretty_json(data),
                 "rule_based_score": pretty_json(rule_score),
                 "final_score": pretty_json(final_score),
+                "model_intent": pretty_json(model_intent),
+                "model_blueprint": pretty_json(model_blueprint),
             },
         )
         raw_generation = get_raw_generation_response(args, generation_prompt)
         write_text(output_dir / "codex_generation_response_raw.txt", raw_generation)
         generation_response = validate_generation_response(parse_json_response(raw_generation))
         write_json(output_dir / "codex_generation_response.json", generation_response)
+        quality_report = validate_generation_quality(generation_response, model_intent, model_blueprint)
+        write_json(output_dir / "generation_quality_report.json", quality_report)
+        write_generation_quality_report_markdown(output_dir, quality_report)
+        if quality_report["status"] != "passed":
+            print("Generation quality validation failed. See output/generation_quality_report.md.", file=sys.stderr)
+            return 1
         write_final_output(output_dir, generation_response)
         print("Pipeline completed: final output generated. See output/final_output.md.")
         return 0

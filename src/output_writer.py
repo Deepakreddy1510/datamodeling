@@ -8,11 +8,15 @@ KNOWN_GENERATED_FILES = [
     "codex_semantic_review_response_raw.txt",
     "codex_semantic_review_response.json",
     "final_readiness_score.json",
+    "model_intent.json",
+    "model_blueprint.json",
     "improvement_suggestions.md",
     "codex_generation_prompt.md",
     "codex_generation_response_raw.txt",
     "codex_generation_response.json",
     "final_output.md",
+    "generation_quality_report.json",
+    "generation_quality_report.md",
     "validation_errors.json",
     "validation_errors.md",
     "error.json",
@@ -127,6 +131,25 @@ def write_improvement_suggestions(output_dir, rule_score, semantic_review, final
     lines.append("")
     write_text(Path(output_dir) / "improvement_suggestions.md", "\n".join(lines))
 
+
+
+def write_generation_quality_report_markdown(output_dir, quality_report):
+    lines = [
+        "# Generation Quality Report",
+        "",
+        f"Status: **{quality_report.get('status', 'unknown')}**",
+        "",
+        "## Errors",
+        "",
+    ]
+    lines.extend([f"- {error}" for error in quality_report.get("errors", [])] or ["- None"])
+    lines.extend(["", "## Warnings", ""])
+    lines.extend([f"- {warning}" for warning in quality_report.get("warnings", [])] or ["- None"])
+    lines.extend(["", "## Checks", "", "| Check | Passed |", "|---|---:|"])
+    for name, value in quality_report.get("checks", {}).items():
+        lines.append(f"| {name} | {value} |")
+    lines.append("")
+    write_text(Path(output_dir) / "generation_quality_report.md", "\n".join(lines))
 
 def ensure_ai_additions_section(markdown_text):
     text = markdown_text.rstrip()

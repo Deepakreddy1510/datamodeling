@@ -25,6 +25,18 @@ Return strict JSON only. Do not include markdown code fences, commentary, or exp
 {{final_score}}
 ```
 
+## Model Intent JSON
+
+```json
+{{model_intent}}
+```
+
+## Model Blueprint JSON
+
+```json
+{{model_blueprint}}
+```
+
 ## Possible Requested Sections
 
 Business Input Summary
@@ -46,6 +58,56 @@ Fact Tables
 Dimension Tables
 Transformation Plan
 Orchestration Plan
+
+
+## Model Intent Instructions
+
+If model_intent.model_type is analytical_data_warehouse, dimensional_model, or star_schema:
+
+- Do not generate only operational OLTP tables.
+- Generate a layered analytical warehouse model.
+- Use the model_blueprint as guidance.
+- YAML does not need to explicitly list every final technical table.
+- Infer technical tables from business context.
+
+For analytical warehouse output, generate:
+
+1. Raw load tables using load_ prefix
+2. Staging tables using stg_ prefix
+3. Dimension tables using dim_ prefix
+4. Fact tables using fact_ prefix
+5. Fact grain for every fact table
+6. Primary keys
+7. Foreign keys
+8. UNIQUE constraints where useful
+9. CHECK constraints for numeric/status quality rules
+10. Indexes for joins and reporting filters
+11. PostgreSQL SQL DDL for all generated tables
+12. Data dictionary for all generated tables
+13. Relationships and cardinality
+14. Synthetic data generation rules for every table
+15. PostgreSQL loading order
+16. AI Additions / Assumptions
+
+For facts:
+
+- Clearly state the grain.
+- Include foreign keys to dimensions.
+- Include measurable metrics.
+- Infer facts from business processes, transactions, events, and reporting requirements.
+
+For dimensions:
+
+- Use descriptive/master entities as dimensions.
+- Add surrogate keys.
+- Keep natural/business keys where useful.
+- Add SCD-style fields only when appropriate.
+- If adding SCD fields, list them under AI Additions / Assumptions.
+
+If model_intent.model_type is operational_model:
+
+- Preserve normal operational relational modeling behavior.
+- Do not force dimensional warehouse layers.
 
 ## Critical AI Additions Rule
 
