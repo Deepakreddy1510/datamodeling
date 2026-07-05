@@ -1,5 +1,9 @@
 import re
-import sqlparse
+
+try:
+    import sqlparse
+except ImportError:  # pragma: no cover - exercised when optional dependency is unavailable
+    sqlparse = None
 
 from .models import Column, DDLModel, ForeignKey, Table
 
@@ -109,6 +113,7 @@ def _parse_column(part, table):
     numeric_match = re.match(r"^(?:numeric|decimal)\s*\((\d+)\s*,\s*(\d+)\)", data_type, re.IGNORECASE)
     numeric_precision = int(numeric_match.group(1)) if numeric_match else None
     numeric_scale = int(numeric_match.group(2)) if numeric_match else None
+    default_match = re.search(r"\bDEFAULT\s+(.+?)(?=\s+NOT\s+NULL|\s+PRIMARY\s+KEY|\s+REFERENCES\b|\s+CHECK\b|$)", constraints, re.IGNORECASE | re.DOTALL)
     column = Column(
         name=name,
         data_type=data_type,
@@ -117,6 +122,7 @@ def _parse_column(part, table):
         max_length=max_length,
         numeric_precision=numeric_precision,
         numeric_scale=numeric_scale,
+        default=default_match.group(1).strip() if default_match else None,
     )
     ref_match = re.search(r"\bREFERENCES\b", constraints, re.IGNORECASE)
     if ref_match:
@@ -130,9 +136,34 @@ def _parse_column(part, table):
     table.columns.append(column)
 
 
+def _split_statements(ddl_text):
+    if sqlparse is not None:
+        return [statement.strip() for statement in sqlparse.split(ddl_text) if statement.strip()]
+    statements = []
+    current = []
+    depth = 0
+    in_quote = False
+    for char in ddl_text:
+        if char == "'":
+            in_quote = not in_quote
+        elif not in_quote:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == ";" and depth == 0:
+                statements.append("".join(current).strip() + ";")
+                current = []
+                continue
+        current.append(char)
+    if current and "".join(current).strip():
+        statements.append("".join(current).strip())
+    return statements
+
+
 def parse_ddl(ddl_text):
     model = DDLModel()
-    statements = [statement.strip() for statement in sqlparse.split(ddl_text) if statement.strip()]
+    statements = _split_statements(ddl_text)
     for statement in statements:
         schema_match = CREATE_SCHEMA_RE.match(statement)
         if schema_match:

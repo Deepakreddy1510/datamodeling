@@ -5,7 +5,40 @@ import random
 import re
 import uuid
 
-from faker import Faker
+try:
+    from faker import Faker
+except ImportError:  # pragma: no cover - exercised when optional dependency is unavailable
+    class Faker:
+        _first = ["Alex", "Jordan", "Taylor", "Morgan", "Casey"]
+        _last = ["Smith", "Patel", "Garcia", "Brown", "Jones"]
+        _cities = ["London", "Manchester", "Bristol", "Leeds", "Glasgow"]
+        _countries = ["United Kingdom", "United States", "Canada", "Australia", "Ireland"]
+        _words = ["Alpha", "Nova", "Summit", "Atlas", "Vertex"]
+        def __init__(self):
+            self._idx = 0
+        @staticmethod
+        def seed(_seed):
+            return None
+        def _next(self, values):
+            value = values[self._idx % len(values)]
+            self._idx += 1
+            return value
+        def first_name(self):
+            return self._next(self._first)
+        def last_name(self):
+            return self._next(self._last)
+        def name(self):
+            return f"{self.first_name()} {self.last_name()}"
+        def city(self):
+            return self._next(self._cities)
+        def country(self):
+            return self._next(self._countries)
+        def street_address(self):
+            return f"{self._idx + 1} Main Street"
+        def word(self):
+            return self._next(self._words).lower()
+        def sentence(self, nb_words=8):
+            return " ".join(self.word() for _ in range(nb_words)).capitalize() + "."
 
 from .value_catalog_parser import get_catalog_rule
 
@@ -128,6 +161,11 @@ def normalize_value_for_column(value, column, stats=None):
         if isinstance(value, datetime):
             return value
         return datetime.fromisoformat(str(value))
+    if "uuid" in dtype:
+        try:
+            return str(uuid.UUID(str(value)))
+        except (ValueError, TypeError):
+            return str(uuid.uuid5(uuid.NAMESPACE_DNS, str(value)))
     return _bounded(str(value), column, stats or {"truncated_values": 0})
 
 def _render_pattern(pattern, fake, table, column, index, stats, catalog):
@@ -251,11 +289,39 @@ def _apply_calculation_rule(rule, row, column, stats):
     if not rule:
         return None
     calculation = str(rule.get("calculation_rule") or "").strip()
-    if not calculation or "=" not in calculation:
+    if not calculation:
+        return None
+
+    flag_match = re.search(
+        r"(?:flag\s+)?true\s+when\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*['\"]?([^'\"]+)['\"]?",
+        calculation,
+        re.IGNORECASE,
+    )
+    if flag_match and ("bool" in column.data_type.lower() or column.name.lower().endswith("flag") or column.name.lower().startswith("is_")):
+        source_name, expected = flag_match.groups()
+        return str(row.get(source_name, "")).strip().lower() == expected.strip().lower()
+
+    if "=" not in calculation:
         return None
     target, expression = [part.strip() for part in calculation.split("=", 1)]
     if target.lower() != column.name.lower():
         return None
+
+    percentage_match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*/\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\*\s*100", expression, re.IGNORECASE)
+    if percentage_match:
+        numerator = _to_decimal(row.get(percentage_match.group(1)))
+        denominator = _to_decimal(row.get(percentage_match.group(2)))
+        if numerator is not None and denominator not in (None, Decimal("0")):
+            return (numerator / denominator) * Decimal("100")
+        return None
+
+    delay_match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*-\s*([a-zA-Z_][a-zA-Z0-9_]*)", expression)
+    if delay_match and "minute" in column.name.lower():
+        left = row.get(delay_match.group(1))
+        right = row.get(delay_match.group(2))
+        if isinstance(left, datetime) and isinstance(right, datetime):
+            return int((left - right).total_seconds() // 60)
+
     match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*([*+\-/])\s*([a-zA-Z_][a-zA-Z0-9_]*)", expression)
     if not match:
         stats["calculation_warnings"].append(f"Unsupported calculation rule for {column.name}: {calculation}")
@@ -274,7 +340,6 @@ def _apply_calculation_rule(rule, row, column, stats):
     if operator == "/" and right != 0:
         return left / right
     return None
-
 
 def _finalize_calculations(model, generated, value_catalog, stats):
     for table in model.tables:

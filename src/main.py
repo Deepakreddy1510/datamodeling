@@ -131,7 +131,7 @@ def main():
         quality_report = validate_generation_quality(generation_response, model_intent, model_blueprint)
         write_json(output_dir / "generation_quality_report.json", quality_report)
         write_generation_quality_report_markdown(output_dir, quality_report)
-        if quality_report["status"] != "passed":
+        if quality_report["status"] == "failed":
             print("Generation quality validation failed. See output/generation_quality_report.md.", file=sys.stderr)
             return 1
         write_final_output(output_dir, generation_response)

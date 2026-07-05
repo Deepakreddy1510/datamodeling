@@ -25,6 +25,7 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
         f"- Excel output: `{excel_output}`",
         f"- Rows per table: {rows_per_table}",
         f"- Phase 1 catalog found: {bool((value_catalog or {}).get('catalog_found'))}",
+        f"- Catalog parsed: {bool((value_catalog or {}).get('catalog_found')) and not (value_catalog or {}).get('errors')}",
         f"- Catalog table-column rules: {(value_catalog or {}).get('rule_count', 0)}", "",
         "## DDL Extraction Summary", "",
         f"- Extracted DDL characters: {len(ddl_text)}",
@@ -66,6 +67,8 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     lines.append(f"- Columns generated using catalog: {len(stats.get('catalog_columns_used', []))}")
     lines.append(f"- Columns generated using fallback: {len(stats.get('fallback_columns_used', []))}")
     lines.append(f"- Placeholder warning count: {len(validation.get('placeholder_warnings', []))}")
+    lines.append(f"- Unsupported calculation rule warnings: {len(stats.get('calculation_warnings', []))}")
+    lines.extend([f"  - unsupported calculation: {item}" for item in stats.get("calculation_warnings", [])])
     lines.extend([f"  - catalog: {item}" for item in stats.get("catalog_columns_used", [])])
     lines.extend([f"  - fallback: {item}" for item in stats.get("fallback_columns_used", [])])
 
@@ -118,6 +121,15 @@ def write_validation_report(path, pre_validation, post_validation=None):
     lines.extend([f"- {item}" for item in pre_validation.get("calculation_errors", [])] or ["- No calculation errors."])
     lines.extend(["", "## Placeholder Validation", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("placeholder_warnings", [])] or ["- No placeholder warnings."])
+    lines.extend(["", "## Row Count Summary", "", "| Table | Rows |", "|---|---:|"])
+    row_counts = pre_validation.get("row_count_summary", {})
+    if row_counts:
+        for table, count in row_counts.items():
+            lines.append(f"| {table} | {count} |")
+    else:
+        lines.append("| None | 0 |")
+    lines.extend(["", "## Unsupported Calculation Rules", ""])
+    lines.extend([f"- {item}" for item in stats.get("calculation_warnings", [])] or ["- None"])
     lines.extend(["", "## PostgreSQL Validation", ""])
     if post_validation is None:
         lines.append("PostgreSQL validation was skipped because no database load was requested.")

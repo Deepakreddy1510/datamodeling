@@ -145,8 +145,19 @@ def write_generation_quality_report_markdown(output_dir, quality_report):
     lines.extend([f"- {error}" for error in quality_report.get("errors", [])] or ["- None"])
     lines.extend(["", "## Warnings", ""])
     lines.extend([f"- {warning}" for warning in quality_report.get("warnings", [])] or ["- None"])
-    lines.extend(["", "## Checks", "", "| Check | Passed |", "|---|---:|"])
-    for name, value in quality_report.get("checks", {}).items():
+    checks = quality_report.get("checks", {})
+    lines.extend([
+        "", "## Summary", "",
+        f"- Model intent: `{checks.get('model_type', 'unknown')}`",
+        f"- Required layers: `{checks.get('required_layers', [])}`",
+        f"- Catalog parsed: {checks.get('catalog_parsed', False)}",
+        f"- Catalog rule count: {checks.get('catalog_rule_count', 0)}",
+        f"- Catalog coverage percentage: {checks.get('catalog_coverage_percentage', 0)}",
+        "", "## Missing Important Catalog Rules", "",
+    ])
+    lines.extend([f"- {item}" for item in checks.get("missing_catalog_rules", [])] or ["- None"])
+    lines.extend(["", "## Checks", "", "| Check | Passed / Value |", "|---|---:|"])
+    for name, value in checks.items():
         lines.append(f"| {name} | {value} |")
     lines.append("")
     write_text(Path(output_dir) / "generation_quality_report.md", "\n".join(lines))

@@ -11,6 +11,7 @@ def parse_synthetic_value_catalog(phase1_output_text):
     if start == -1 or end == -1 or end <= start:
         return {
             "catalog_found": False,
+            "markers_present": False,
             "catalog": {},
             "warnings": [MISSING_CATALOG_WARNING],
             "errors": [],
@@ -23,6 +24,7 @@ def parse_synthetic_value_catalog(phase1_output_text):
     except json.JSONDecodeError as exc:
         return {
             "catalog_found": False,
+            "markers_present": True,
             "catalog": {},
             "warnings": [],
             "errors": [f"Synthetic value catalog JSON is invalid: {exc}"],
@@ -31,6 +33,7 @@ def parse_synthetic_value_catalog(phase1_output_text):
     if not isinstance(catalog, dict):
         return {
             "catalog_found": False,
+            "markers_present": True,
             "catalog": {},
             "warnings": [],
             "errors": ["Synthetic value catalog JSON root must be an object."],
@@ -40,15 +43,30 @@ def parse_synthetic_value_catalog(phase1_output_text):
     if not isinstance(rules, list):
         return {
             "catalog_found": False,
+            "markers_present": True,
             "catalog": {},
             "warnings": [],
             "errors": ["Synthetic value catalog table_column_rules must be a list."],
             "rule_count": 0,
         }
+    invalid_rules = [index for index, rule in enumerate(rules, start=1) if not isinstance(rule, dict) or not rule.get("column_name")]
+    if invalid_rules:
+        return {
+            "catalog_found": False,
+            "markers_present": True,
+            "catalog": catalog,
+            "warnings": [],
+            "errors": [f"Synthetic value catalog rules must be objects with column_name. Invalid rule indexes: {invalid_rules}"],
+            "rule_count": 0,
+        }
+    warnings = []
+    if not rules:
+        warnings.append("Synthetic value catalog table_column_rules is empty.")
     return {
         "catalog_found": True,
+        "markers_present": True,
         "catalog": catalog,
-        "warnings": [],
+        "warnings": warnings,
         "errors": [],
         "rule_count": len(rules),
     }

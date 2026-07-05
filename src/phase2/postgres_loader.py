@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 import psycopg
 from psycopg import sql
 
+from .synthetic_data_generator import table_generation_order
+
 
 class PostgresLoadError(Exception):
     pass
@@ -21,7 +23,7 @@ def _column_ddl(column):
 
 
 def _adapt(value):
-    return float(value) if isinstance(value, Decimal) else value
+    return value
 
 
 def load_env():
@@ -104,7 +106,7 @@ def load_to_postgres(model, data, *, create_schema_if_missing=False, create_tabl
                         conn.execute(sql.SQL("TRUNCATE TABLE {}.{} CASCADE").format(sql.Identifier(cfg["target_schema"]), sql.Identifier(table.name)))
 
                 transaction_status = "in_progress"
-                for table in model.tables:
+                for table in table_generation_order(model):
                     columns = table.column_names()
                     insert = sql.SQL("INSERT INTO {}.{} ({}) VALUES ({})").format(
                         sql.Identifier(cfg["target_schema"]),

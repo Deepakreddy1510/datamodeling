@@ -106,3 +106,14 @@ CREATE TABLE numeric_test (
     assert columns["small_amount"].numeric_scale == 2
     assert columns["large_amount"].numeric_precision == 10
     assert columns["large_amount"].numeric_scale == 4
+
+
+def test_parse_column_default_value():
+    model = parse_ddl("""
+CREATE TABLE default_test (
+  id integer PRIMARY KEY,
+  status varchar(20) DEFAULT 'new' NOT NULL
+);
+""")
+    columns = {column.name: column for column in model.tables[0].columns}
+    assert columns["status"].default == "'new'"

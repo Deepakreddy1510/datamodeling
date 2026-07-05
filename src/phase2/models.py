@@ -12,6 +12,7 @@ class Column:
     max_length: int | None = None
     numeric_precision: int | None = None
     numeric_scale: int | None = None
+    default: str | None = None
 
 
 @dataclass

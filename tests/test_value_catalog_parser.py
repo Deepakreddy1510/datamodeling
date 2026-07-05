@@ -48,3 +48,23 @@ def test_global_rule_can_apply_by_column_name():
         ]},
     }
     assert get_catalog_rule(catalog, "delivery", "status")["allowed_values"] == ["Active"]
+
+
+def test_invalid_catalog_root_returns_error():
+    result = parse_synthetic_value_catalog("BEGIN_SYNTHETIC_VALUE_CATALOG_JSON\n[]\nEND_SYNTHETIC_VALUE_CATALOG_JSON")
+    assert result["catalog_found"] is False
+    assert result["markers_present"] is True
+    assert result["errors"]
+
+
+def test_empty_rules_returns_warning():
+    result = parse_synthetic_value_catalog("BEGIN_SYNTHETIC_VALUE_CATALOG_JSON\n{\"table_column_rules\": []}\nEND_SYNTHETIC_VALUE_CATALOG_JSON")
+    assert result["catalog_found"] is True
+    assert result["rule_count"] == 0
+    assert result["warnings"]
+
+
+def test_rule_without_column_name_returns_error():
+    result = parse_synthetic_value_catalog("BEGIN_SYNTHETIC_VALUE_CATALOG_JSON\n{\"table_column_rules\": [{\"table_name\": \"dim_customer\"}]}\nEND_SYNTHETIC_VALUE_CATALOG_JSON")
+    assert result["catalog_found"] is False
+    assert result["errors"]

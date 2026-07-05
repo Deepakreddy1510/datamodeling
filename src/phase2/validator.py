@@ -35,13 +35,71 @@ def _is_placeholder(value):
     return isinstance(value, str) and bool(re.fullmatch(r"[a-z_]+_\d{3}", value.lower()))
 
 
+def _normalize_rule_value(value, column):
+    dtype = column.data_type.lower()
+    if value is None:
+        return None
+    try:
+        if any(token in dtype for token in ["int", "serial"]):
+            return int(Decimal(str(value)))
+        if any(token in dtype for token in ["numeric", "decimal", "double", "float"]):
+            decimal_value = Decimal(str(value))
+            if column.numeric_scale is not None:
+                decimal_value = decimal_value.quantize(Decimal(1).scaleb(-column.numeric_scale) if column.numeric_scale else Decimal(1))
+            return decimal_value
+        if "bool" in dtype:
+            if isinstance(value, bool):
+                return value
+            normalized = str(value).strip().lower()
+            if normalized in {"true", "yes", "1", "y"}:
+                return True
+            if normalized in {"false", "no", "0", "n"}:
+                return False
+        if dtype.startswith("date"):
+            if isinstance(value, date) and not isinstance(value, datetime):
+                return value
+            return datetime.fromisoformat(str(value)).date()
+        if "timestamp" in dtype:
+            if isinstance(value, datetime):
+                return value
+            return datetime.fromisoformat(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return value
+    return str(value)
+
+
 def _validate_calculation(rule, row, column):
     calculation = str((rule or {}).get("calculation_rule") or "").strip()
-    if not calculation or "=" not in calculation:
+    if not calculation:
+        return None
+    flag_match = re.search(
+        r"(?:flag\s+)?true\s+when\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*['\"]?([^'\"]+)['\"]?",
+        calculation,
+        re.IGNORECASE,
+    )
+    if flag_match and ("bool" in column.data_type.lower() or column.name.lower().endswith("flag") or column.name.lower().startswith("is_")):
+        source_name, expected = flag_match.groups()
+        return row.get(column.name) == (str(row.get(source_name, "")).strip().lower() == expected.strip().lower())
+    if "=" not in calculation:
         return None
     target, expression = [part.strip() for part in calculation.split("=", 1)]
     if target.lower() != column.name.lower():
         return None
+    percentage_match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*/\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\*\s*100", expression, re.IGNORECASE)
+    if percentage_match:
+        numerator = _decimal(row.get(percentage_match.group(1)))
+        denominator = _decimal(row.get(percentage_match.group(2)))
+        actual = _decimal(row.get(column.name))
+        if numerator is None or denominator in (None, Decimal("0")) or actual is None:
+            return False
+        expected = (numerator / denominator) * Decimal("100")
+        return actual == expected.quantize(actual) if actual.as_tuple().exponent < 0 else actual == expected
+    delay_match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*-\s*([a-zA-Z_][a-zA-Z0-9_]*)", expression)
+    if delay_match and "minute" in column.name.lower():
+        left = row.get(delay_match.group(1))
+        right = row.get(delay_match.group(2))
+        if isinstance(left, datetime) and isinstance(right, datetime):
+            return row.get(column.name) == int((left - right).total_seconds() // 60)
     match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*([*+\-/])\s*([a-zA-Z_][a-zA-Z0-9_]*)", expression)
     if not match:
         return None
@@ -63,7 +121,6 @@ def _validate_calculation(rule, row, column):
         return None
     return actual == expected.quantize(actual) if actual.as_tuple().exponent < 0 else actual == expected
 
-
 def validate_generated_data(model, data, expected_rows, value_catalog=None):
     errors = []
     catalog_compliance_errors = []
@@ -77,6 +134,12 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
     length_checks = []
     numeric_checks = []
     catalog_rules_checked = 0
+    catalog_warnings = list((value_catalog or {}).get("warnings", []))
+    catalog_errors = list((value_catalog or {}).get("errors", []))
+    if catalog_errors:
+        errors.extend(catalog_errors)
+    if (value_catalog or {}).get("markers_present") and (value_catalog or {}).get("rule_count", 0) == 0:
+        errors.append("Synthetic value catalog markers were present but no usable table_column_rules were found.")
 
     for table in model.tables:
         rows = data.get(table.name, [])
@@ -123,7 +186,7 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
                         errors.append(f"{table.name}.{column.name}: value exceeds numeric({column.numeric_precision},{column.numeric_scale}) precision/scale in row {idx}.")
 
                 if rule:
-                    allowed = rule.get("allowed_values") or []
+                    allowed = [_normalize_rule_value(item, column) for item in (rule.get("allowed_values") or [])]
                     if allowed and value not in allowed and value not in (None, ""):
                         catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx} value {value!r} is not in allowed_values {allowed!r}.")
                     numeric_min = rule.get("numeric_min")
@@ -177,4 +240,7 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
         "data_type_errors": data_type_errors,
         "calculation_errors": calculation_errors,
         "placeholder_warnings": placeholder_warnings,
+        "catalog_parser_warnings": catalog_warnings,
+        "catalog_parser_errors": catalog_errors,
+        "row_count_summary": {table.name: len(data.get(table.name, [])) for table in model.tables},
     }
