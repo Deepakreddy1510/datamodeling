@@ -65,6 +65,7 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     lines.extend([f"- Catalog parser error: {item}" for item in (value_catalog or {}).get("errors", [])] or ["- Catalog parser errors: None"])
     lines.append(f"- Columns generated using catalog: {len(stats.get('catalog_columns_used', []))}")
     lines.append(f"- Columns generated using fallback: {len(stats.get('fallback_columns_used', []))}")
+    lines.append(f"- Placeholder warning count: {len(validation.get('placeholder_warnings', []))}")
     lines.extend([f"  - catalog: {item}" for item in stats.get("catalog_columns_used", [])])
     lines.extend([f"  - fallback: {item}" for item in stats.get("fallback_columns_used", [])])
 
@@ -96,7 +97,8 @@ def write_postgres_report(path, load_requested, result):
 
 def write_validation_report(path, pre_validation, post_validation=None):
     final_status = _overall_status(pre_validation.get("status"), post_validation.get("status") if post_validation else None)
-    lines = ["# Validation Report", "", f"- Final status: **{final_status}**", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
+    stats = pre_validation.get("generation_stats", {})
+    lines = ["# Validation Report", "", f"- Final status: **{final_status}**", f"- Catalog found: {stats.get('catalog_found', False)}", f"- Catalog rule count: {stats.get('catalog_rule_count', 0)}", f"- Catalog rules checked: {pre_validation.get('catalog_rules_checked', 0)}", f"- Catalog columns used: {len(stats.get('catalog_columns_used', []))}", f"- Fallback columns used: {len(stats.get('fallback_columns_used', []))}", f"- Placeholder warning count: {len(pre_validation.get('placeholder_warnings', []))}", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
     lines.extend([f"- {error}" for error in pre_validation.get("errors", [])] or ["- No validation errors."])
     lines.extend(["", "## FK Validation Coverage", "", "### Parsed FK Relationships", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("parsed_fk_relationships", [])] or ["- None"])
@@ -104,6 +106,10 @@ def write_validation_report(path, pre_validation, post_validation=None):
     lines.extend([f"- {item}" for item in pre_validation.get("checked_fk_relationships", [])] or ["- None"])
     lines.extend(["", "### FK-like Columns Skipped Because No Parsed FK Exists", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("skipped_fk_like_columns", [])] or ["- None"])
+    lines.extend(["", "## Catalog Parser Warnings", ""])
+    lines.extend([f"- {item}" for item in stats.get("catalog_warnings", [])] or ["- None"])
+    lines.extend(["", "## Catalog Parser Errors", ""])
+    lines.extend([f"- {item}" for item in stats.get("catalog_errors", [])] or ["- None"])
     lines.extend(["", "## Catalog Compliance", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("catalog_compliance_errors", [])] or ["- No catalog compliance errors."])
     lines.extend(["", "## Data Type Validation", ""])

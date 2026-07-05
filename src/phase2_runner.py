@@ -69,7 +69,6 @@ def main():
         data = generate_synthetic_data(model, args.rows_per_table, args.seed, value_catalog=value_catalog)
         pre_validation = validate_generated_data(model, data, args.rows_per_table, value_catalog=value_catalog)
         pre_validation["generation_stats"] = data.get("__stats__", {})
-        write_excel(model, data, args.excel_output)
         write_generation_report(
             output_dir / "synthetic_data_generation_report.md",
             yaml_path=args.yaml,
@@ -86,6 +85,8 @@ def main():
             write_validation_report(output_dir / "validation_report.md", pre_validation)
             print("Phase 2 failed pre-load validation. See output/validation_report.md.", file=sys.stderr)
             return 1
+
+        write_excel(model, data, args.excel_output)
 
         post_validation = None
         load_result = {}

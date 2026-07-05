@@ -99,6 +99,37 @@ def _short_email(index, column, stats, first_name="user", last_name="example"):
     return _bounded(value, column, stats)
 
 
+
+def normalize_value_for_column(value, column, stats=None):
+    dtype = column.data_type.lower()
+    if value is None:
+        return None
+    if any(token in dtype for token in ["int", "serial"]):
+        return int(Decimal(str(value)))
+    if any(token in dtype for token in ["numeric", "decimal", "double", "float"]):
+        decimal_value = Decimal(str(value))
+        if column.numeric_scale is not None:
+            decimal_value = decimal_value.quantize(Decimal(1).scaleb(-column.numeric_scale) if column.numeric_scale else Decimal(1))
+        return decimal_value
+    if "bool" in dtype:
+        if isinstance(value, bool):
+            return value
+        normalized = str(value).strip().lower()
+        if normalized in {"true", "yes", "1", "y"}:
+            return True
+        if normalized in {"false", "no", "0", "n"}:
+            return False
+        return bool(value)
+    if dtype.startswith("date"):
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(str(value)).date()
+    if "timestamp" in dtype:
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(str(value))
+    return _bounded(str(value), column, stats or {"truncated_values": 0})
+
 def _render_pattern(pattern, fake, table, column, index, stats, catalog):
     context = (catalog or {}).get("business_context", {}) if isinstance(catalog, dict) else {}
     replacements = {
@@ -115,7 +146,7 @@ def _render_pattern(pattern, fake, table, column, index, stats, catalog):
     value = pattern
     for key, replacement in replacements.items():
         value = value.replace("{" + key + "}", str(replacement))
-    return _bounded(value, column, stats)
+    return normalize_value_for_column(value, column, stats)
 
 
 def _catalog_value(rule, fake, rng, table, column, index, stats, catalog):
@@ -124,10 +155,10 @@ def _catalog_value(rule, fake, rng, table, column, index, stats, catalog):
     stats["catalog_columns_used"].add(f"{table.name}.{column.name}")
     allowed = rule.get("allowed_values") or []
     if allowed:
-        return _cycle([str(value) for value in allowed], index, column, stats)
+        return normalize_value_for_column(_cycle(allowed, index, column, stats), column, stats)
     examples = rule.get("value_examples") or []
     if examples:
-        return _cycle([str(value) for value in examples], index, column, stats)
+        return normalize_value_for_column(_cycle(examples, index, column, stats), column, stats)
     pattern = rule.get("value_pattern")
     if pattern:
         return _render_pattern(str(pattern), fake, table, column, index, stats, catalog)
@@ -135,12 +166,12 @@ def _catalog_value(rule, fake, rng, table, column, index, stats, catalog):
         if any(token in column.data_type.lower() for token in ["int", "serial"]):
             min_value = int(rule.get("numeric_min") if rule.get("numeric_min") is not None else 1)
             max_value = int(rule.get("numeric_max") if rule.get("numeric_max") is not None else 100)
-            return rng.randint(min_value, max(max_value, min_value))
-        return _numeric_value(rng, column, stats, rule.get("numeric_min"), rule.get("numeric_max"))
+            return normalize_value_for_column(rng.randint(min_value, max(max_value, min_value)), column, stats)
+        return normalize_value_for_column(_numeric_value(rng, column, stats, rule.get("numeric_min"), rule.get("numeric_max")), column, stats)
     if rule.get("boolean_rule"):
-        return index % 2 == 0
+        return normalize_value_for_column(index % 2 == 0, column, stats)
     if rule.get("date_rule"):
-        return date.today() - timedelta(days=index % 365)
+        return normalize_value_for_column(date.today() - timedelta(days=index % 365), column, stats)
     return None
 
 
@@ -171,9 +202,10 @@ def _fallback_value(fake, rng, table, column, index, stats):
     if "last_name" in name:
         return _bounded(fake.last_name(), column, stats)
     if any(token in name for token in ["product_name", "service_name", "item_name"]):
-        return _bounded(_generic_label(title, index), column, stats)
+        return _bounded(f"{title} {fake.word().title()} {index:03d}", column, stats)
     if any(token in name for token in ["store_name", "branch_name", "location_name"]):
-        return _bounded(f"{title} {fake.city()} {index:03d}", column, stats)
+        business_name = stats.get("business_name") or title
+        return _bounded(f"{business_name} {fake.city()} Location {index:03d}", column, stats)
     if name.endswith("status") or name == "status":
         return _cycle(GENERIC_STATUSES, index, column, stats)
     if "segment" in name:
@@ -278,6 +310,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
         "generic_fallback_values": 0,
         "calculated_columns": set(),
         "calculation_warnings": [],
+        "business_name": ((catalog or {}).get("business_context", {}) if isinstance(catalog, dict) else {}).get("business_name", ""),
     }
 
     for table in table_generation_order(model):

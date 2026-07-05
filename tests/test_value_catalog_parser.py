@@ -25,3 +25,26 @@ def test_invalid_catalog_returns_error():
     result = parse_synthetic_value_catalog("BEGIN_SYNTHETIC_VALUE_CATALOG_JSON\n{bad\nEND_SYNTHETIC_VALUE_CATALOG_JSON")
     assert result["catalog_found"] is False
     assert result["errors"]
+
+from phase2.value_catalog_parser import get_catalog_rule
+
+
+def test_table_specific_rule_does_not_fall_back_to_other_table():
+    catalog = {
+        "catalog_found": True,
+        "catalog": {"table_column_rules": [
+            {"table_name": "payment", "column_name": "status", "allowed_values": ["Paid"]}
+        ]},
+    }
+    assert get_catalog_rule(catalog, "payment", "status")["allowed_values"] == ["Paid"]
+    assert get_catalog_rule(catalog, "delivery", "status") is None
+
+
+def test_global_rule_can_apply_by_column_name():
+    catalog = {
+        "catalog_found": True,
+        "catalog": {"table_column_rules": [
+            {"table_name": "*", "column_name": "status", "allowed_values": ["Active"]}
+        ]},
+    }
+    assert get_catalog_rule(catalog, "delivery", "status")["allowed_values"] == ["Active"]

@@ -83,3 +83,33 @@ def test_generic_fallback_avoids_ugly_name_placeholders():
     assert first["product_name"] != "product_name_001"
     assert first["customer_segment"] in {"New", "Regular", "Premium"}
     assert "@" in first["email"]
+
+
+def test_catalog_allowed_values_are_normalized_to_column_types():
+    model = parse_ddl("""
+CREATE TABLE typed_catalog (
+  id integer PRIMARY KEY,
+  int_value integer,
+  bool_value boolean,
+  date_value date,
+  amount numeric(5,2)
+);
+""")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 4,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "typed_catalog", "column_name": "int_value", "allowed_values": ["1", "2"]},
+            {"table_name": "typed_catalog", "column_name": "bool_value", "allowed_values": ["true", "false"]},
+            {"table_name": "typed_catalog", "column_name": "date_value", "allowed_values": ["2026-01-01"]},
+            {"table_name": "typed_catalog", "column_name": "amount", "numeric_min": 1, "numeric_max": 3},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=4, seed=1, value_catalog=catalog)
+    for row in data["typed_catalog"]:
+        assert isinstance(row["int_value"], int)
+        assert isinstance(row["bool_value"], bool)
+        assert row["date_value"].isoformat() == "2026-01-01"
+        assert row["amount"] <= Decimal("3.00")

@@ -58,7 +58,7 @@ def build_rule_lookup(value_catalog):
     catalog = (value_catalog or {}).get("catalog", value_catalog or {})
     rules = catalog.get("table_column_rules", []) if isinstance(catalog, dict) else []
     exact = {}
-    by_column = {}
+    global_by_column = {}
     for rule in rules:
         if not isinstance(rule, dict):
             continue
@@ -66,16 +66,18 @@ def build_rule_lookup(value_catalog):
         column = str(rule.get("column_name", "")).lower()
         if not column:
             continue
-        if table:
+        is_global = table in {"", "*"} or rule.get("applies_to_all_tables") is True or rule.get("scope") == "global"
+        if table and table != "*":
             exact[(table, column)] = rule
             if "." in table:
                 exact[(table.split(".")[-1], column)] = rule
-        by_column.setdefault(column, rule)
-    return exact, by_column
+        if is_global:
+            global_by_column.setdefault(column, rule)
+    return exact, global_by_column
 
 
 def get_catalog_rule(value_catalog, table_name, column_name):
-    exact, by_column = build_rule_lookup(value_catalog)
+    exact, global_by_column = build_rule_lookup(value_catalog)
     table = str(table_name).lower()
     column = str(column_name).lower()
-    return exact.get((table, column)) or by_column.get(column)
+    return exact.get((table, column)) or global_by_column.get(column)
