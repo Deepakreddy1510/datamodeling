@@ -14,7 +14,7 @@ def _overall_status(*statuses):
     return "passed"
 
 
-def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation):
+def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation, value_catalog=None):
     stats = validation.get("generation_stats", {})
     final_status = _overall_status(validation.get("status"), "passed_with_warnings" if getattr(model, "warnings", []) else None)
     lines = [
@@ -23,7 +23,9 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
         f"- YAML input: `{yaml_path}`",
         f"- Phase 1 output: `{phase1_output}`",
         f"- Excel output: `{excel_output}`",
-        f"- Rows per table: {rows_per_table}", "",
+        f"- Rows per table: {rows_per_table}",
+        f"- Phase 1 catalog found: {bool((value_catalog or {}).get('catalog_found'))}",
+        f"- Catalog table-column rules: {(value_catalog or {}).get('rule_count', 0)}", "",
         "## DDL Extraction Summary", "",
         f"- Extracted DDL characters: {len(ddl_text)}",
         f"- Tables parsed: {len(model.tables)}", "",
@@ -57,6 +59,14 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     lines.extend([f"- {item}" for item in validation.get("checked_fk_relationships", [])] or ["- None"])
     lines.extend(["", "### FK-like Columns Skipped Because No FK Exists in DDL", ""])
     lines.extend([f"- {item}" for item in validation.get("skipped_fk_like_columns", [])] or ["- None"])
+
+    lines.extend(["", "## Catalog Generation Strategy", ""])
+    lines.extend([f"- Catalog parser warning: {item}" for item in (value_catalog or {}).get("warnings", [])] or ["- Catalog parser warnings: None"])
+    lines.extend([f"- Catalog parser error: {item}" for item in (value_catalog or {}).get("errors", [])] or ["- Catalog parser errors: None"])
+    lines.append(f"- Columns generated using catalog: {len(stats.get('catalog_columns_used', []))}")
+    lines.append(f"- Columns generated using fallback: {len(stats.get('fallback_columns_used', []))}")
+    lines.extend([f"  - catalog: {item}" for item in stats.get("catalog_columns_used", [])])
+    lines.extend([f"  - fallback: {item}" for item in stats.get("fallback_columns_used", [])])
 
     lines.extend(["", "## Pre-load Validation", "", f"Status: **{validation['status']}**", ""])
     lines.extend([f"- {error}" for error in validation.get("errors", [])] or ["- No validation errors."])
@@ -94,6 +104,14 @@ def write_validation_report(path, pre_validation, post_validation=None):
     lines.extend([f"- {item}" for item in pre_validation.get("checked_fk_relationships", [])] or ["- None"])
     lines.extend(["", "### FK-like Columns Skipped Because No Parsed FK Exists", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("skipped_fk_like_columns", [])] or ["- None"])
+    lines.extend(["", "## Catalog Compliance", ""])
+    lines.extend([f"- {item}" for item in pre_validation.get("catalog_compliance_errors", [])] or ["- No catalog compliance errors."])
+    lines.extend(["", "## Data Type Validation", ""])
+    lines.extend([f"- {item}" for item in pre_validation.get("data_type_errors", [])] or ["- No data type errors."])
+    lines.extend(["", "## Calculation Validation", ""])
+    lines.extend([f"- {item}" for item in pre_validation.get("calculation_errors", [])] or ["- No calculation errors."])
+    lines.extend(["", "## Placeholder Validation", ""])
+    lines.extend([f"- {item}" for item in pre_validation.get("placeholder_warnings", [])] or ["- No placeholder warnings."])
     lines.extend(["", "## PostgreSQL Validation", ""])
     if post_validation is None:
         lines.append("PostgreSQL validation was skipped because no database load was requested.")

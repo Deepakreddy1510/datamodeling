@@ -1,6 +1,8 @@
 import re
 
 AI_ADDITIONS_HEADING = "# AI Additions / Assumptions"
+CATALOG_START = "BEGIN_SYNTHETIC_VALUE_CATALOG_JSON"
+CATALOG_END = "END_SYNTHETIC_VALUE_CATALOG_JSON"
 ANALYTICAL_TYPES = {"analytical_data_warehouse", "dimensional_model", "star_schema"}
 
 
@@ -39,6 +41,8 @@ def validate_generation_quality(generation_response, model_intent, model_bluepri
         "staging_tables_present": _has_prefix_table(text, "stg_"),
         "ddl_present": bool(re.search(r"\bCREATE\s+TABLE\b", text, re.IGNORECASE)),
         "ai_additions_present": AI_ADDITIONS_HEADING.lower() in markdown.lower(),
+        "synthetic_value_catalog_section_present": "# synthetic data value catalog" in markdown.lower(),
+        "synthetic_value_catalog_json_present": CATALOG_START in markdown and CATALOG_END in markdown,
     }
 
     if model_type in ANALYTICAL_TYPES:
@@ -54,6 +58,8 @@ def validate_generation_quality(generation_response, model_intent, model_bluepri
             errors.append("Generated output does not contain CREATE TABLE DDL.")
         if not checks["ai_additions_present"]:
             errors.append("Generated output is missing AI Additions / Assumptions.")
+        if not checks["synthetic_value_catalog_section_present"] or not checks["synthetic_value_catalog_json_present"]:
+            errors.append("Synthetic Data Value Catalog is required for analytical outputs but was not found.")
         missing_facts = [
             fact for fact in model_blueprint.get("inferred_fact_tables", [])
             if not _reasonable_fact_present(expected_output, fact)

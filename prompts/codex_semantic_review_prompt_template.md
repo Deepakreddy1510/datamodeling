@@ -43,6 +43,8 @@ Check all of the following:
 17. Is expected modeling style clear or inferable?
 18. If fact/dimension output is requested, can it be inferred without requiring the user to manually list all fact and dimension tables?
 19. Does the YAML remain business-friendly rather than forcing technical table lists?
+20. Is there enough business context to infer a Synthetic Data Value Catalog for realistic Phase 2 data generation?
+21. Can status, segment, category, type, method, amount, quantity, date, flag, relationship, and calculated-column rules be inferred from the business context?
 
 ## Scoring Rubric
 
@@ -62,7 +64,7 @@ Do not score above 90 unless reporting requirements are supported.
 Do not score above 90 unless expected outputs are clear.
 Do not score above 90 unless target platform/database is clear.
 If physical model, SQL DDL, schema, or data dictionary are requested, entity attributes are important.
-If analytics outputs are requested, reporting grain, metrics, facts, and dimensions should be evaluated. Do not reject business-friendly YAML only because dim_, fact_, stg_, or load_ tables are not explicitly listed.
+If analytics outputs are requested, reporting grain, metrics, facts, and dimensions should be evaluated. Do not reject business-friendly YAML only because dim_, fact_, stg_, or load_ tables are not explicitly listed. Do not reject it only because the user did not manually list all synthetic data allowed values; the accelerator should infer a Synthetic Data Value Catalog when context is sufficient.
 If entity attributes are missing, score should usually be below 90 unless expected output is conceptual model only.
 
 ## Required JSON Response

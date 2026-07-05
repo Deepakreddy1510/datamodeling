@@ -109,6 +109,58 @@ If model_intent.model_type is operational_model:
 - Preserve normal operational relational modeling behavior.
 - Do not force dimensional warehouse layers.
 
+
+## Required Synthetic Data Value Catalog
+
+The final_output_markdown must include this exact section and marker format after the SQL/data dictionary sections:
+
+# Synthetic Data Value Catalog
+
+BEGIN_SYNTHETIC_VALUE_CATALOG_JSON
+{
+  "business_context": {
+    "business_name": "",
+    "business_type": "",
+    "model_purpose": "",
+    "target_database": ""
+  },
+  "table_column_rules": [
+    {
+      "table_name": "",
+      "column_name": "",
+      "semantic_role": "",
+      "data_type": "",
+      "allowed_values": [],
+      "value_examples": [],
+      "value_pattern": "",
+      "numeric_min": null,
+      "numeric_max": null,
+      "date_rule": "",
+      "boolean_rule": "",
+      "calculation_rule": "",
+      "relationship_rule": "",
+      "nullable_rule": "",
+      "uniqueness_rule": "",
+      "business_reason": ""
+    }
+  ],
+  "business_rules": [
+    {
+      "rule_name": "",
+      "description": "",
+      "tables": [],
+      "columns": [],
+      "validation_logic": ""
+    }
+  ],
+  "generation_assumptions": []
+}
+END_SYNTHETIC_VALUE_CATALOG_JSON
+
+The catalog must be specific to the business input and generated model. For every generated table and column, provide at least one useful rule: allowed_values, value_examples, value_pattern, numeric_min/numeric_max, date_rule, boolean_rule, calculation_rule, or relationship_rule.
+
+Do not return generic filler. Infer status, segment, category, type, method, amount, quantity, date, flag, FK, and calculated-column rules from the YAML business context, model intent, model blueprint, generated DDL, and relationships. This catalog is how Phase 2 generates realistic values; Phase 2 must not know business-specific domains in advance.
+
 ## Critical AI Additions Rule
 
 If you add anything not explicitly present in the input, list it under this markdown heading in final_output_markdown:
