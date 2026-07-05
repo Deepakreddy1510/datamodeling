@@ -109,3 +109,23 @@ END_SYNTHETIC_VALUE_CATALOG_JSON
     result = validate_generation_quality({"final_output_markdown": markdown}, ANALYTICAL_INTENT, BLUEPRINT)
     assert result["status"] == "failed"
     assert any("table_column_rules" in error for error in result["errors"])
+
+
+def test_analytical_quality_fails_when_catalog_coverage_below_threshold():
+    markdown = """
+# SQL DDL
+```sql
+CREATE TABLE load_customer_raw (id integer, customer_name varchar(50));
+CREATE TABLE stg_customer (id integer, customer_name varchar(50));
+CREATE TABLE dim_customer (customer_key integer, customer_name varchar(50), customer_status varchar(20));
+CREATE TABLE fact_sales (sales_key integer, customer_key integer, order_total_amount numeric(8,2));
+```
+# AI Additions / Assumptions
+# Synthetic Data Value Catalog
+BEGIN_SYNTHETIC_VALUE_CATALOG_JSON
+{"table_column_rules": [{"table_name":"dim_customer","column_name":"customer_key"}]}
+END_SYNTHETIC_VALUE_CATALOG_JSON
+"""
+    result = validate_generation_quality({"final_output_markdown": markdown}, ANALYTICAL_INTENT, BLUEPRINT)
+    assert result["status"] == "failed"
+    assert any("coverage" in error.lower() or "missing rules" in error.lower() for error in result["errors"])

@@ -24,12 +24,32 @@ class ForeignKey:
 
 
 @dataclass
+class UniqueConstraint:
+    columns: list[str]
+    name: str | None = None
+
+
+@dataclass
+class CheckConstraint:
+    expression: str
+    column: str | None = None
+    operator: str | None = None
+    values: list[str] = field(default_factory=list)
+    min_value: str | None = None
+    max_value: str | None = None
+    name: str | None = None
+    supported: bool = False
+
+
+@dataclass
 class Table:
     name: str
     schema: str | None = None
     columns: list[Column] = field(default_factory=list)
     primary_key: list[str] = field(default_factory=list)
     foreign_keys: list[ForeignKey] = field(default_factory=list)
+    unique_constraints: list[UniqueConstraint] = field(default_factory=list)
+    check_constraints: list[CheckConstraint] = field(default_factory=list)
     ignored_constraints: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 

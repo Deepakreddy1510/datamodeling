@@ -194,9 +194,10 @@ def validate_generation_quality(generation_response, model_intent, model_bluepri
         if missing_facts:
             warnings.append(f"Inferred fact table(s) not found by name or close equivalent: {', '.join(missing_facts)}")
         if checks.get("missing_catalog_rules"):
-            if checks.get("catalog_coverage_percentage", 0) < 50:
-                errors.append("Synthetic Data Value Catalog coverage is too low for analytical output.")
+            errors.append("Synthetic Data Value Catalog is missing rules for generated tables or critical semantic columns.")
             warnings.extend(checks["missing_catalog_rules"][:25])
+        if checks.get("catalog_coverage_percentage", 0) < 80:
+            errors.append("Synthetic Data Value Catalog coverage is below the required 80% threshold for analytical output.")
     else:
         if not markdown.strip():
             errors.append("Generated final_output_markdown is empty.")

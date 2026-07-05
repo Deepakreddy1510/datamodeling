@@ -62,7 +62,7 @@ CREATE TABLE audit_load (
     table = model.tables[0]
     assert table.column_names() == ["audit_load_id", "load_status"]
     assert "CHECK" not in table.column_names()
-    assert table.ignored_constraints
+    assert table.check_constraints
 
 
 def test_parse_named_check_constraint_is_not_column():
@@ -77,7 +77,7 @@ CREATE TABLE audit_load (
     assert table.column_names() == ["audit_load_id", "load_status"]
     assert "CONSTRAINT" not in table.column_names()
     assert "CHECK" not in table.column_names()
-    assert table.ignored_constraints
+    assert table.check_constraints
 
 
 def test_parse_varchar_and_character_varying_lengths():
@@ -117,3 +117,51 @@ CREATE TABLE default_test (
 """)
     columns = {column.name: column for column in model.tables[0].columns}
     assert columns["status"].default == "'new'"
+
+
+def test_parse_unique_constraints_metadata():
+    model = parse_ddl("""
+CREATE TABLE unique_test (
+  id integer PRIMARY KEY,
+  code varchar(20) UNIQUE,
+  sku varchar(20),
+  asin varchar(20),
+  CONSTRAINT uq_sku_asin UNIQUE (sku, asin)
+);
+""")
+    table = model.tables[0]
+    assert [constraint.columns for constraint in table.unique_constraints] == [["code"], ["sku", "asin"]]
+
+
+def test_parse_supported_check_constraints_metadata():
+    model = parse_ddl("""
+CREATE TABLE check_test (
+  id integer PRIMARY KEY,
+  status varchar(20),
+  amount numeric(6,2),
+  score integer,
+  CHECK (status IN ('Active','Inactive')),
+  CHECK (amount >= 0),
+  CHECK (score BETWEEN 1 AND 10)
+);
+""")
+    checks = model.tables[0].check_constraints
+    assert [(check.column, check.operator, check.supported) for check in checks] == [
+        ("status", "IN", True),
+        ("amount", ">=", True),
+        ("score", "BETWEEN", True),
+    ]
+
+
+def test_unsupported_check_constraint_is_reported_as_warning():
+    model = parse_ddl("""
+CREATE TABLE unsupported_check_test (
+  id integer PRIMARY KEY,
+  amount numeric(6,2),
+  CHECK (amount IS NOT NULL OR id > 0)
+);
+""")
+    table = model.tables[0]
+    assert table.check_constraints[0].supported is False
+    assert table.ignored_constraints
+    assert model.warnings

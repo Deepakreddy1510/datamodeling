@@ -1,8 +1,17 @@
 import os
-from decimal import Decimal
-from dotenv import load_dotenv
-import psycopg
-from psycopg import sql
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - exercised when optional dependency is unavailable
+    def load_dotenv():
+        return False
+
+try:
+    import psycopg
+    from psycopg import sql
+except ImportError:  # pragma: no cover - dry runs should not require psycopg
+    psycopg = None
+    sql = None
 
 from .synthetic_data_generator import table_generation_order
 
@@ -11,12 +20,19 @@ class PostgresLoadError(Exception):
     pass
 
 
+def _require_psycopg():
+    if psycopg is None or sql is None:
+        raise PostgresLoadError("psycopg is required for PostgreSQL loading. Install dependencies with pip install -r requirements.txt.")
+
+
 def _quote_type(data_type):
     return sql.SQL(data_type)
 
 
 def _column_ddl(column):
     pieces = [sql.Identifier(column.name), _quote_type(column.data_type)]
+    if column.default is not None:
+        pieces.append(sql.SQL("DEFAULT ") + sql.SQL(column.default))
     if not column.nullable or column.is_primary_key:
         pieces.append(sql.SQL("NOT NULL"))
     return sql.SQL(" ").join(pieces)
@@ -51,6 +67,11 @@ def _create_table(conn, table, schema):
     constraints = []
     if table.primary_key:
         constraints.append(sql.SQL("PRIMARY KEY ({})").format(sql.SQL(", ").join(sql.Identifier(col) for col in table.primary_key)))
+    for unique in getattr(table, "unique_constraints", []):
+        constraints.append(sql.SQL("UNIQUE ({})").format(sql.SQL(", ").join(sql.Identifier(col) for col in unique.columns)))
+    for check in getattr(table, "check_constraints", []):
+        if getattr(check, "supported", False):
+            constraints.append(sql.SQL("CHECK ({})").format(sql.SQL(check.expression)))
     for fk in table.foreign_keys:
         constraints.append(sql.SQL("FOREIGN KEY ({}) REFERENCES {}.{} ({})").format(
             sql.SQL(", ").join(sql.Identifier(col) for col in fk.child_columns),
@@ -65,6 +86,7 @@ def _create_table(conn, table, schema):
 
 
 def load_to_postgres(model, data, *, create_schema_if_missing=False, create_tables_if_missing=False, truncate_before_load=False, allow_insert_into_nonempty_tables=False):
+    _require_psycopg()
     cfg = {}
     inserted = {}
     errors = []
@@ -84,7 +106,7 @@ def load_to_postgres(model, data, *, create_schema_if_missing=False, create_tabl
                     if not exists:
                         raise PostgresLoadError(f"Target schema {cfg['target_schema']} does not exist. Use --create-schema-if-missing to create it.")
 
-                for table in model.tables:
+                for table in table_generation_order(model):
                     exists = conn.execute(
                         "SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
                         [cfg["target_schema"], table.name],
@@ -132,6 +154,7 @@ def load_to_postgres(model, data, *, create_schema_if_missing=False, create_tabl
 
 
 def validate_postgres_load(model, expected_counts):
+    _require_psycopg()
     cfg = load_env()
     errors = []
     row_counts = {}

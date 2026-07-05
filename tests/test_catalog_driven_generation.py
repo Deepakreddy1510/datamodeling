@@ -113,3 +113,41 @@ CREATE TABLE typed_catalog (
         assert isinstance(row["bool_value"], bool)
         assert row["date_value"].isoformat() == "2026-01-01"
         assert row["amount"] <= Decimal("3.00")
+
+
+def test_percentage_delay_and_status_flag_calculations():
+    model = parse_ddl("""
+CREATE TABLE fact_metrics (
+  id integer PRIMARY KEY,
+  numerator numeric(6,2),
+  denominator numeric(6,2),
+  percentage numeric(6,2),
+  promised_timestamp timestamp,
+  actual_timestamp timestamp,
+  delay_minutes integer,
+  status varchar(20),
+  success_flag boolean
+);
+""")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 8,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "fact_metrics", "column_name": "numerator", "numeric_min": 10, "numeric_max": 10},
+            {"table_name": "fact_metrics", "column_name": "denominator", "numeric_min": 20, "numeric_max": 20},
+            {"table_name": "fact_metrics", "column_name": "percentage", "calculation_rule": "percentage = numerator / denominator * 100"},
+            {"table_name": "fact_metrics", "column_name": "promised_timestamp", "value_examples": ["2026-01-01T10:00:00"]},
+            {"table_name": "fact_metrics", "column_name": "actual_timestamp", "value_examples": ["2026-01-01T10:30:00"]},
+            {"table_name": "fact_metrics", "column_name": "delay_minutes", "calculation_rule": "delay_minutes = actual_timestamp - promised_timestamp"},
+            {"table_name": "fact_metrics", "column_name": "status", "allowed_values": ["Successful"]},
+            {"table_name": "fact_metrics", "column_name": "success_flag", "calculation_rule": "true when status = Successful"},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=2, seed=1, value_catalog=catalog)
+    for row in data["fact_metrics"]:
+        assert row["percentage"] == Decimal("50.00")
+        assert row["delay_minutes"] == 30
+        assert row["success_flag"] is True
+    assert validate_generated_data(model, data, 2, value_catalog=catalog)["status"] == "passed"

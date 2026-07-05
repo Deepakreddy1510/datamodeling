@@ -44,3 +44,35 @@ def test_validator_fails_numeric_scale_overflow_before_load():
     result = validate_generated_data(model, data, expected_rows=1)
     assert result["status"] == "failed"
     assert "numeric(5,2)" in result["errors"][0]
+
+
+def test_validator_fails_missing_catalog_for_analytical_tables():
+    model = parse_ddl("CREATE TABLE dim_customer (customer_key integer PRIMARY KEY, customer_name varchar(50));")
+    data = {"dim_customer": [{"customer_key": 1, "customer_name": "Alex Smith"}]}
+    result = validate_generated_data(model, data, expected_rows=1, value_catalog={"catalog_found": False, "markers_present": False, "warnings": [], "errors": [], "rule_count": 0, "catalog": {}})
+    assert result["status"] == "failed"
+    assert any("Analytical DDL" in error for error in result["errors"])
+
+
+def test_validator_fails_unique_constraint_violation():
+    model = parse_ddl("CREATE TABLE t (id integer PRIMARY KEY, code varchar(20) UNIQUE);")
+    data = {"t": [{"id": 1, "code": "A"}, {"id": 2, "code": "A"}]}
+    result = validate_generated_data(model, data, expected_rows=2)
+    assert result["status"] == "failed"
+    assert result["constraint_errors"]
+
+
+def test_validator_fails_check_in_and_numeric_check_violations():
+    model = parse_ddl("""
+CREATE TABLE t (
+  id integer PRIMARY KEY,
+  status varchar(20),
+  amount numeric(5,2),
+  CHECK (status IN ('Active','Inactive')),
+  CHECK (amount >= 0)
+);
+""")
+    data = {"t": [{"id": 1, "status": "Deleted", "amount": "-1.00"}]}
+    result = validate_generated_data(model, data, expected_rows=1)
+    assert result["status"] == "failed"
+    assert len(result["constraint_errors"]) == 2

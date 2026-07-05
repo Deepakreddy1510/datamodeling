@@ -121,11 +121,40 @@ def _validate_calculation(rule, row, column):
         return None
     return actual == expected.quantize(actual) if actual.as_tuple().exponent < 0 else actual == expected
 
+
+def _is_analytical_model(model):
+    return any(table.name.lower().startswith(("dim_", "fact_")) for table in model.tables)
+
+
+def _validate_check_value(check, value):
+    if value in (None, "") or not check.supported:
+        return True
+    if check.operator == "IN":
+        return str(value) in {str(item) for item in check.values}
+    decimal_value = _decimal(value)
+    if decimal_value is None:
+        return True
+    if check.operator == "BETWEEN":
+        return Decimal(str(check.min_value)) <= decimal_value <= Decimal(str(check.max_value))
+    threshold = Decimal(str(check.min_value))
+    if check.operator == ">":
+        return decimal_value > threshold
+    if check.operator == ">=":
+        return decimal_value >= threshold
+    if check.operator == "<":
+        return decimal_value < threshold
+    if check.operator == "<=":
+        return decimal_value <= threshold
+    return True
+
 def validate_generated_data(model, data, expected_rows, value_catalog=None):
     errors = []
     catalog_compliance_errors = []
     data_type_errors = []
     calculation_errors = []
+    constraint_errors = []
+    date_rule_errors = []
+    boolean_rule_errors = []
     placeholder_warnings = []
     table_map = model.table_map()
     parsed_fks = [_fk_label(fk) for table in model.tables for fk in table.foreign_keys]
@@ -140,6 +169,8 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
         errors.extend(catalog_errors)
     if (value_catalog or {}).get("markers_present") and (value_catalog or {}).get("rule_count", 0) == 0:
         errors.append("Synthetic value catalog markers were present but no usable table_column_rules were found.")
+    if _is_analytical_model(model) and not (value_catalog or {}).get("catalog_found"):
+        errors.append("Analytical DDL contains dim_/fact_ tables but no valid Synthetic Data Value Catalog was found.")
 
     for table in model.tables:
         rows = data.get(table.name, [])
@@ -214,6 +245,21 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
                     errors.append(f"{table.name}: duplicate primary key {key}.")
                     break
                 seen.add(key)
+        for unique in getattr(table, "unique_constraints", []):
+            seen_unique = set()
+            for row in rows:
+                key = tuple(row.get(col) for col in unique.columns)
+                if key in seen_unique:
+                    constraint_errors.append(f"{table.name}: duplicate UNIQUE constraint value {key} for columns {unique.columns}.")
+                    break
+                seen_unique.add(key)
+        for check in getattr(table, "check_constraints", []):
+            if not getattr(check, "supported", False):
+                continue
+            for idx, row in enumerate(rows, start=1):
+                if not _validate_check_value(check, row.get(check.column)):
+                    constraint_errors.append(f"{table.name}.{check.column} row {idx}: CHECK constraint {check.expression!r} is not satisfied.")
+                    break
         for fk in table.foreign_keys:
             checked_fks.append(_fk_label(fk))
             parent = table_map[fk.parent_table.lower()]
@@ -225,6 +271,9 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
                     break
     errors.extend(catalog_compliance_errors)
     errors.extend(data_type_errors)
+    errors.extend(constraint_errors)
+    errors.extend(date_rule_errors)
+    errors.extend(boolean_rule_errors)
     errors.extend(calculation_errors)
     status = "failed" if errors else ("passed_with_warnings" if skipped_fk_like_columns or placeholder_warnings else "passed")
     return {
@@ -239,6 +288,9 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
         "catalog_compliance_errors": catalog_compliance_errors,
         "data_type_errors": data_type_errors,
         "calculation_errors": calculation_errors,
+        "constraint_errors": constraint_errors,
+        "date_rule_errors": date_rule_errors,
+        "boolean_rule_errors": boolean_rule_errors,
         "placeholder_warnings": placeholder_warnings,
         "catalog_parser_warnings": catalog_warnings,
         "catalog_parser_errors": catalog_errors,

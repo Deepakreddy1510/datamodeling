@@ -5,7 +5,7 @@ try:
 except ImportError:  # pragma: no cover - exercised when optional dependency is unavailable
     sqlparse = None
 
-from .models import Column, DDLModel, ForeignKey, Table
+from .models import CheckConstraint, Column, DDLModel, ForeignKey, Table, UniqueConstraint
 
 
 class DDLParserError(Exception):
@@ -68,8 +68,31 @@ def _parse_references(text):
     return table_name, _parse_column_list(match.group(2))
 
 
+
+def _constraint_name(original):
+    match = re.match(r'CONSTRAINT\s+([\w"]+)\s+', original, re.IGNORECASE)
+    return _clean_identifier(match.group(1)) if match else None
+
+
+def _parse_check_expression(expression, name=None):
+    text = expression.strip()
+    if text.upper().startswith("CHECK"):
+        text = text[text.find("(") + 1: text.rfind(")")].strip()
+    in_match = re.fullmatch(r'([\w"]+)\s+IN\s*\((.+)\)', text, re.IGNORECASE | re.DOTALL)
+    if in_match:
+        values = [item.strip().strip("'").strip('"') for item in _split_top_level_commas(in_match.group(2))]
+        return CheckConstraint(expression=text, column=_clean_identifier(in_match.group(1)), operator="IN", values=values, name=name, supported=True)
+    between_match = re.fullmatch(r'([\w"]+)\s+BETWEEN\s+(-?\d+(?:\.\d+)?)\s+AND\s+(-?\d+(?:\.\d+)?)', text, re.IGNORECASE)
+    if between_match:
+        return CheckConstraint(expression=text, column=_clean_identifier(between_match.group(1)), operator="BETWEEN", min_value=between_match.group(2), max_value=between_match.group(3), name=name, supported=True)
+    compare_match = re.fullmatch(r'([\w"]+)\s*(>=|<=|>|<)\s*(-?\d+(?:\.\d+)?)', text, re.IGNORECASE)
+    if compare_match:
+        return CheckConstraint(expression=text, column=_clean_identifier(compare_match.group(1)), operator=compare_match.group(2), min_value=compare_match.group(3), max_value=compare_match.group(3), name=name, supported=True)
+    return CheckConstraint(expression=text, name=name, supported=False)
+
 def _parse_table_constraint(part, table):
     original = part.strip()
+    constraint_name = _constraint_name(original)
     text = re.sub(r"^CONSTRAINT\s+[\w\"]+\s+", "", original, flags=re.IGNORECASE)
     pk_match = re.search(r"PRIMARY\s+KEY\s*\(([^)]+)\)", text, re.IGNORECASE)
     if pk_match:
@@ -82,13 +105,15 @@ def _parse_table_constraint(part, table):
         return
     unique_match = re.search(r"UNIQUE\s*\(([^)]+)\)", text, re.IGNORECASE)
     if unique_match:
-        table.ignored_constraints.append(f"UNIQUE: {original}")
-        table.warnings.append("UNIQUE constraint recognized but not enforced by Phase 2 MVP synthetic data generation.")
+        table.unique_constraints.append(UniqueConstraint(_parse_column_list(unique_match.group(1)), name=constraint_name))
         return
     check_match = re.search(r"CHECK\s*\(", text, re.IGNORECASE)
     if check_match:
-        table.ignored_constraints.append(f"CHECK: {original}")
-        table.warnings.append("CHECK constraint recognized but not enforced by Phase 2 MVP synthetic data generation.")
+        check = _parse_check_expression(text, name=constraint_name)
+        table.check_constraints.append(check)
+        if not check.supported:
+            table.ignored_constraints.append(f"CHECK: {original}")
+            table.warnings.append(f"Unsupported CHECK constraint ignored safely: {original}")
         return
     if re.match(r"^CONSTRAINT\b", original, re.IGNORECASE):
         table.ignored_constraints.append(f"UNSUPPORTED: {original}")
@@ -130,6 +155,15 @@ def _parse_column(part, table):
         column.references_table = parent_table
         column.references_column = parent_columns[0]
         table.foreign_keys.append(ForeignKey(table.name, [name], parent_table, [parent_columns[0]]))
+    if re.search(r"\bUNIQUE\b", constraints, re.IGNORECASE):
+        table.unique_constraints.append(UniqueConstraint([name]))
+    inline_check = re.search(r"\bCHECK\s*\((.+)\)", constraints, re.IGNORECASE | re.DOTALL)
+    if inline_check:
+        check = _parse_check_expression(f"CHECK ({inline_check.group(1)})")
+        table.check_constraints.append(check)
+        if not check.supported:
+            table.ignored_constraints.append(f"CHECK: {name} {inline_check.group(0)}")
+            table.warnings.append(f"Unsupported CHECK constraint ignored safely for column {name}.")
     if column.is_primary_key:
         table.primary_key.append(name)
         column.nullable = False

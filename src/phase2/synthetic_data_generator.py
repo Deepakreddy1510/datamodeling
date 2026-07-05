@@ -187,7 +187,56 @@ def _render_pattern(pattern, fake, table, column, index, stats, catalog):
     return normalize_value_for_column(value, column, stats)
 
 
-def _catalog_value(rule, fake, rng, table, column, index, stats, catalog):
+
+def _date_from_rule(rule_text, row, index, rng, stats):
+    text = str(rule_text or "").strip().lower()
+    between_match = re.search(r"between\s+(\d{4}-\d{2}-\d{2})\s+and\s+(\d{4}-\d{2}-\d{2})", text)
+    if between_match:
+        start = datetime.fromisoformat(between_match.group(1)).date()
+        end = datetime.fromisoformat(between_match.group(2)).date()
+        days = max((end - start).days, 0)
+        return start + timedelta(days=rng.randint(0, days))
+    relation_match = re.search(r"(before|after|same day or after|derived from)\s+([a-zA-Z_][a-zA-Z0-9_]*)", text)
+    if relation_match:
+        relation, source_name = relation_match.groups()
+        source = row.get(source_name)
+        if isinstance(source, datetime):
+            source = source.date()
+        if isinstance(source, date):
+            if relation == "before":
+                return source - timedelta(days=1 + (index % 7))
+            if relation in {"after", "same day or after"}:
+                return source + timedelta(days=index % 7)
+            if relation == "derived from":
+                return source
+    if "start <= end" in text or "effective_start_date <= effective_end_date" in text:
+        return date.today() - timedelta(days=index % 365)
+    if text:
+        stats["date_rule_warnings"].append(f"Unsupported date_rule: {rule_text}")
+    return date.today() - timedelta(days=index % 365)
+
+
+def _boolean_from_rule(rule_text, row, index, stats):
+    text = str(rule_text or "").strip()
+    match = re.search(r"(true|false)\s+when\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(=|!=|>|<|>=|<=)\s*['\"]?([^'\"]+)['\"]?", text, re.IGNORECASE)
+    if not match:
+        if text:
+            stats["boolean_rule_warnings"].append(f"Unsupported boolean_rule: {rule_text}")
+        return index % 2 == 0
+    expected_bool, column_name, operator, raw_expected = match.groups()
+    actual = row.get(column_name)
+    expected_decimal = _to_decimal(raw_expected)
+    actual_decimal = _to_decimal(actual)
+    if operator in {">", "<", ">=", "<="} and expected_decimal is not None and actual_decimal is not None:
+        comparisons = {">": actual_decimal > expected_decimal, "<": actual_decimal < expected_decimal, ">=": actual_decimal >= expected_decimal, "<=": actual_decimal <= expected_decimal}
+        outcome = comparisons[operator]
+    elif operator == "=":
+        outcome = str(actual).strip().lower() == raw_expected.strip().lower()
+    else:
+        outcome = str(actual).strip().lower() != raw_expected.strip().lower()
+    return outcome if expected_bool.lower() == "true" else not outcome
+
+def _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row=None):
     if not rule:
         return None
     stats["catalog_columns_used"].add(f"{table.name}.{column.name}")
@@ -207,9 +256,9 @@ def _catalog_value(rule, fake, rng, table, column, index, stats, catalog):
             return normalize_value_for_column(rng.randint(min_value, max(max_value, min_value)), column, stats)
         return normalize_value_for_column(_numeric_value(rng, column, stats, rule.get("numeric_min"), rule.get("numeric_max")), column, stats)
     if rule.get("boolean_rule"):
-        return normalize_value_for_column(index % 2 == 0, column, stats)
+        return normalize_value_for_column(_boolean_from_rule(rule.get("boolean_rule"), row or {}, index, stats), column, stats)
     if rule.get("date_rule"):
-        return normalize_value_for_column(date.today() - timedelta(days=index % 365), column, stats)
+        return normalize_value_for_column(_date_from_rule(rule.get("date_rule"), row or {}, index, rng, stats), column, stats)
     return None
 
 
@@ -375,6 +424,8 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
         "generic_fallback_values": 0,
         "calculated_columns": set(),
         "calculation_warnings": [],
+        "date_rule_warnings": [],
+        "boolean_rule_warnings": [],
         "business_name": ((catalog or {}).get("business_context", {}) if isinstance(catalog, dict) else {}).get("business_name", ""),
     }
 
@@ -389,7 +440,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
                     row[column.name] = _pk_value(column, index, table.name, stats)
                     continue
                 rule = get_catalog_rule(value_catalog, table.name, column.name)
-                value = _catalog_value(rule, fake, rng, table, column, index, stats, catalog)
+                value = _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row)
                 if value is None:
                     stats["fallback_columns_used"].add(f"{table.name}.{column.name}")
                     value = _fallback_value(fake, rng, table, column, index, stats)

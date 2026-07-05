@@ -23,6 +23,7 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
         f"- YAML input: `{yaml_path}`",
         f"- Phase 1 output: `{phase1_output}`",
         f"- Excel output: `{excel_output}`",
+        f"- Excel written in this run: {validation.get('excel_written', False)}",
         f"- Rows per table: {rows_per_table}",
         f"- Phase 1 catalog found: {bool((value_catalog or {}).get('catalog_found'))}",
         f"- Catalog parsed: {bool((value_catalog or {}).get('catalog_found')) and not (value_catalog or {}).get('errors')}",
@@ -117,8 +118,14 @@ def write_validation_report(path, pre_validation, post_validation=None):
     lines.extend([f"- {item}" for item in pre_validation.get("catalog_compliance_errors", [])] or ["- No catalog compliance errors."])
     lines.extend(["", "## Data Type Validation", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("data_type_errors", [])] or ["- No data type errors."])
+    lines.extend(["", "## Constraint Validation", ""])
+    lines.extend([f"- {item}" for item in pre_validation.get("constraint_errors", [])] or ["- No constraint errors."])
     lines.extend(["", "## Calculation Validation", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("calculation_errors", [])] or ["- No calculation errors."])
+    lines.extend(["", "## Date Rule Validation", ""])
+    lines.extend([f"- {item}" for item in pre_validation.get("date_rule_errors", [])] or ["- No date rule errors."])
+    lines.extend(["", "## Boolean Rule Validation", ""])
+    lines.extend([f"- {item}" for item in pre_validation.get("boolean_rule_errors", [])] or ["- No boolean rule errors."])
     lines.extend(["", "## Placeholder Validation", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("placeholder_warnings", [])] or ["- No placeholder warnings."])
     lines.extend(["", "## Row Count Summary", "", "| Table | Rows |", "|---|---:|"])

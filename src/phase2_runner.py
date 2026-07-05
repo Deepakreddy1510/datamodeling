@@ -69,6 +69,26 @@ def main():
         data = generate_synthetic_data(model, args.rows_per_table, args.seed, value_catalog=value_catalog)
         pre_validation = validate_generated_data(model, data, args.rows_per_table, value_catalog=value_catalog)
         pre_validation["generation_stats"] = data.get("__stats__", {})
+        pre_validation["excel_written"] = False
+        if pre_validation["status"] == "failed":
+            write_generation_report(
+                output_dir / "synthetic_data_generation_report.md",
+                yaml_path=args.yaml,
+                phase1_output=str(phase1_output),
+                ddl_text=ddl_text,
+                model=model,
+                rows_per_table=args.rows_per_table,
+                excel_output=args.excel_output,
+                validation=pre_validation,
+                value_catalog=value_catalog,
+            )
+            write_postgres_report(output_dir / "postgres_load_report.md", False, {})
+            write_validation_report(output_dir / "validation_report.md", pre_validation)
+            print("Phase 2 failed pre-load validation. See output/validation_report.md.", file=sys.stderr)
+            return 1
+
+        write_excel(model, data, args.excel_output)
+        pre_validation["excel_written"] = True
         write_generation_report(
             output_dir / "synthetic_data_generation_report.md",
             yaml_path=args.yaml,
@@ -80,13 +100,6 @@ def main():
             validation=pre_validation,
             value_catalog=value_catalog,
         )
-        if pre_validation["status"] == "failed":
-            write_postgres_report(output_dir / "postgres_load_report.md", False, {})
-            write_validation_report(output_dir / "validation_report.md", pre_validation)
-            print("Phase 2 failed pre-load validation. See output/validation_report.md.", file=sys.stderr)
-            return 1
-
-        write_excel(model, data, args.excel_output)
 
         post_validation = None
         load_result = {}
