@@ -492,7 +492,24 @@ def _unique_adjusted_value(value, column, index, stats):
         return datetime.combine(SYNTHETIC_BASE_DATE + timedelta(days=index % 365), datetime.min.time())
     if "bool" in dtype:
         return bool(index % 2)
-    return _bounded(f"{value} {index:03d}", column, stats)
+    suffix = f" {index:03d}"
+    if isinstance(value, str) and value.strip():
+        base = value.strip()
+    else:
+        semantic = column.name.lower()
+        if any(token in semantic for token in ["city", "location", "area"]):
+            base = "Location"
+        elif "region" in semantic:
+            base = "Region"
+        elif any(token in semantic for token in ["category", "segment", "type"]):
+            base = semantic.replace("_", " ").title()
+        elif any(token in semantic for token in ["name", "title", "label"]):
+            base = semantic.replace("_", " ").title()
+        else:
+            base = "Value"
+    if column.max_length:
+        base = base[: max(column.max_length - len(suffix), 1)]
+    return _bounded(f"{base}{suffix}", column, stats)
 
 
 def _fk_parent_for_child(table, column_name):
@@ -503,10 +520,7 @@ def _fk_parent_for_child(table, column_name):
     return None, None
 
 
-def _is_catalog_or_check_constrained(table, column_name, value_catalog):
-    rule = get_catalog_rule(value_catalog, table.name, column_name)
-    if rule and rule.get("allowed_values"):
-        return True
+def _is_check_in_constrained(table, column_name):
     return any(
         getattr(check, "supported", False)
         and check.column == column_name
@@ -514,6 +528,22 @@ def _is_catalog_or_check_constrained(table, column_name, value_catalog):
         and check.values
         for check in getattr(table, "check_constraints", [])
     )
+
+
+def _is_sticky_single_value_hint(table, column_name, value_catalog):
+    """Prefer not to mutate single-value catalog hints for generic domain anchors.
+
+    Catalog values are optional hints, not strict constraints. This helper only
+    affects repair ordering so a single stable anchor such as country, currency,
+    tenant, or market remains stable when another non-strict column can be
+    varied to satisfy a composite UNIQUE constraint.
+    """
+    rule = get_catalog_rule(value_catalog, table.name, column_name)
+    values = (rule or {}).get("allowed_values") or []
+    if len(values) != 1:
+        return False
+    name = column_name.lower()
+    return any(anchor in name for anchor in ["country", "currency", "tenant", "market", "locale"])
 
 
 def _check_in_values(table, column_name):
@@ -594,14 +624,26 @@ def _enforce_unique_constraints(table, row, seen_unique, index, stats, generated
         if adjusted:
             seen.add(tuple(row.get(col) for col in unique.columns))
             continue
+        candidate_columns = []
+        sticky_columns = []
         for column_name in reversed(unique.columns):
             column = column_lookup.get(column_name)
-            if column is None or _fk_parent_for_child(table, column_name)[0] or _is_catalog_or_check_constrained(table, column_name, value_catalog):
+            if column is None or _fk_parent_for_child(table, column_name)[0] or _is_check_in_constrained(table, column_name):
                 continue
-            row[column_name] = _unique_adjusted_value(row.get(column_name), column, index, stats)
-            stats.setdefault("composite_unique_adjustments", set()).add(f"{table.name}.{','.join(unique.columns)}")
-            adjusted = True
-            break
+            if _is_sticky_single_value_hint(table, column_name, value_catalog):
+                sticky_columns.append((column_name, column))
+            else:
+                candidate_columns.append((column_name, column))
+        for column_name, column in candidate_columns + sticky_columns:
+            original = row.get(column_name)
+            for retry in range(0, 25):
+                row[column_name] = _unique_adjusted_value(original, column, index + retry, stats)
+                if tuple(row.get(col) for col in unique.columns) not in seen:
+                    stats.setdefault("composite_unique_adjustments", set()).add(f"{table.name}.{','.join(unique.columns)}")
+                    adjusted = True
+                    break
+            if adjusted:
+                break
         if not adjusted:
             _catalog_warning(
                 stats,

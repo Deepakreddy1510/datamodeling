@@ -349,3 +349,88 @@ CREATE TABLE fact_sales (
     dim_keys = {row["date_key"] for row in data["dim_date"]}
     assert dim_keys == {20260706, 20260707, 20260708}
     assert {row["order_date_key"] for row in data["fact_sales"]} <= dim_keys
+
+
+def _optional_catalog(table_name, rules):
+    return {
+        "catalog_found": True,
+        "markers_present": True,
+        "warnings": [],
+        "errors": [],
+        "rule_count": len(rules),
+        "catalog": {"table_column_rules": [
+            {"table_name": table_name, "column_name": column, "allowed_values": values}
+            for column, values in rules.items()
+        ]},
+    }
+
+
+def test_composite_unique_expands_non_strict_catalog_hints_and_keeps_single_anchor():
+    model = parse_ddl("""
+CREATE TABLE dim_location (
+  location_key integer PRIMARY KEY,
+  city varchar(40),
+  region varchar(40),
+  country varchar(40),
+  UNIQUE (city, region, country)
+);
+""")
+    catalog = _optional_catalog("dim_location", {
+        "city": ["Metro", "Harbor", "Valley", "Central"],
+        "region": ["North", "South"],
+        "country": ["Anchorland"],
+    })
+    data = generate_synthetic_data(model, rows_per_table=100, seed=1, value_catalog=catalog)
+    rows = data["dim_location"]
+    tuples = {(row["city"], row["region"], row["country"]) for row in rows}
+    assert len(tuples) == 100
+    assert {row["country"] for row in rows} == {"Anchorland"}
+    assert validate_generated_data(model, data, 100, value_catalog=catalog)["status"] in {"passed", "passed_with_warnings"}
+
+
+def test_composite_unique_generic_columns_expand_without_mutating_single_market_anchor():
+    model = parse_ddl("""
+CREATE TABLE dim_classification (
+  classification_key integer PRIMARY KEY,
+  category varchar(40),
+  item_type varchar(40),
+  market varchar(40),
+  UNIQUE (category, item_type, market)
+);
+""")
+    catalog = _optional_catalog("dim_classification", {
+        "category": ["Category A", "Category B"],
+        "item_type": ["Type A", "Type B"],
+        "market": ["Primary"],
+    })
+    data = generate_synthetic_data(model, rows_per_table=100, seed=1, value_catalog=catalog)
+    rows = data["dim_classification"]
+    tuples = {(row["category"], row["item_type"], row["market"]) for row in rows}
+    assert len(tuples) == 100
+    assert {row["market"] for row in rows} == {"Primary"}
+    assert validate_generated_data(model, data, 100, value_catalog=catalog)["status"] in {"passed", "passed_with_warnings"}
+
+
+def test_catalog_allowed_values_are_hints_but_check_in_remains_strict_for_unique_repair():
+    expandable = parse_ddl("""
+CREATE TABLE hint_values (
+  id integer PRIMARY KEY,
+  category varchar(30) UNIQUE
+);
+""")
+    catalog = _optional_catalog("hint_values", {"category": ["Only Hint"]})
+    data = generate_synthetic_data(expandable, rows_per_table=5, seed=1, value_catalog=catalog)
+    assert len({row["category"] for row in data["hint_values"]}) == 5
+
+    constrained = parse_ddl("""
+CREATE TABLE strict_values (
+  id integer PRIMARY KEY,
+  status varchar(10) UNIQUE CHECK (status IN ('A', 'B'))
+);
+""")
+    try:
+        generate_synthetic_data(constrained, rows_per_table=5, seed=1)
+    except Exception as exc:
+        assert "DDL constraint capacity exceeded" in str(exc)
+    else:
+        raise AssertionError("Expected capacity failure for UNIQUE CHECK IN with only two values")
