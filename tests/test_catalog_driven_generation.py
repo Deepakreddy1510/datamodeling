@@ -40,6 +40,31 @@ def test_no_cross_catalog_contamination():
     assert values_b.isdisjoint({"New", "Premium", "Family Shopper"})
 
 
+def test_partial_catalog_uses_catalog_and_semantic_fallback_for_business_keys():
+    model = parse_ddl("""
+CREATE TABLE stg_customer (
+  customer_id varchar(30) PRIMARY KEY,
+  customer_segment varchar(30),
+  order_id varchar(40)
+);
+""")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 1,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "stg_customer", "column_name": "customer_segment", "allowed_values": ["New", "Premium"]},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=2, seed=1, value_catalog=catalog)
+    first = data["stg_customer"][0]
+    assert first["customer_segment"] in {"New", "Premium"}
+    assert first["customer_id"] == "CUST-000001"
+    assert first["order_id"] == "ORDER-20260706-000001"
+    assert "stg_customer_001" not in first.values()
+
+
 def test_calculation_rule_quantity_times_unit_price():
     model = parse_ddl("""
 CREATE TABLE fact_sales (
@@ -212,6 +237,21 @@ CREATE TABLE generated_ids (
     assert row["store_id"] == "STORE-0001"
     assert row["order_id"] == "ORD-20260706-000001"
     assert row["line_number"] == 1
+
+
+def test_catalog_pattern_applies_to_varchar_primary_key():
+    model = parse_ddl("CREATE TABLE stg_product (product_id varchar(30) PRIMARY KEY, product_name varchar(50));")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 1,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "stg_product", "column_name": "product_id", "value_pattern": "PROD-{000001}"},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=1, seed=1, value_catalog=catalog)
+    assert data["stg_product"][0]["product_id"] == "PROD-000001"
 
 
 def test_invalid_decimal_pattern_falls_back_without_crashing():

@@ -168,9 +168,9 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
     if catalog_errors:
         errors.extend(catalog_errors)
     if (value_catalog or {}).get("markers_present") and (value_catalog or {}).get("rule_count", 0) == 0:
-        errors.append("Synthetic value catalog markers were present but no usable table_column_rules were found.")
+        catalog_warnings.append("Synthetic value catalog markers were present but no usable table_column_rules were found; used DDL-first semantic inference.")
     if _is_analytical_model(model) and not (value_catalog or {}).get("catalog_found"):
-        errors.append("Analytical DDL contains dim_/fact_ tables but no valid Synthetic Data Value Catalog was found.")
+        catalog_warnings.append("Analytical DDL contains dim_/fact_ tables but no valid Synthetic Data Value Catalog was found; used DDL-first semantic inference.")
 
     for table in model.tables:
         rows = data.get(table.name, [])

@@ -91,6 +91,36 @@ def _cycle(values, index, column, stats):
     return _bounded(values[(index - 1) % len(values)], column, stats)
 
 
+def _semantic_prefix(column_name):
+    base = column_name.lower()
+    if base.endswith("_id"):
+        base = base[:-3]
+    prefix_map = {
+        "customer": "CUST",
+        "product": "PROD",
+        "store": "STORE",
+        "order": "ORDER",
+        "order_item": "ORDERITEM",
+        "payment": "PAYMENT",
+        "delivery": "DELIVERY",
+        "supplier": "SUPPLIER",
+        "employee": "EMPLOYEE",
+        "user": "USER",
+        "account": "ACCOUNT",
+        "invoice": "INVOICE",
+        "transaction": "TXN",
+    }
+    return prefix_map.get(base, re.sub(r"[^A-Z0-9]", "", base.upper()) or "ID")
+
+
+def _business_id_value(column, index):
+    name = column.name.lower()
+    prefix = _semantic_prefix(name)
+    if name == "order_id" or name.endswith("_order_id"):
+        return f"{prefix}-{_date_key_value(index)}-{index:06d}"
+    return f"{prefix}-{index:06d}"
+
+
 def _pk_value(column, index, table_name, stats):
     dtype = column.data_type.lower()
     if "uuid" in dtype:
@@ -99,6 +129,8 @@ def _pk_value(column, index, table_name, stats):
         if column.name.lower() == "date_key" or column.name.lower().endswith("_date_key"):
             return _date_key_value(index)
         return index
+    if column.name.lower().endswith("_id") and any(token in dtype for token in ["char", "text"]):
+        return _bounded(_business_id_value(column, index), column, stats)
     return _bounded(f"{table_name}_{index:03d}", column, stats)
 
 
@@ -179,6 +211,25 @@ def _type_compatible_fallback(column, stats=None, value=None, reason="conversion
     if "uuid" in dtype:
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{column.name}.{value}"))
     return _bounded(str(value or ""), column, stats or {"truncated_values": 0})
+
+
+def _check_constraint_value(table, column, index, stats):
+    for check in getattr(table, "check_constraints", []):
+        if not getattr(check, "supported", False) or check.column != column.name:
+            continue
+        if check.operator == "IN" and check.values:
+            return normalize_value_for_column(_cycle(check.values, index, column, stats), column, stats)
+        if check.operator == "BETWEEN":
+            return normalize_value_for_column(check.min_value, column, stats)
+        if check.operator in {">", ">="}:
+            base = Decimal(str(check.min_value))
+            value = base + (Decimal(1) if check.operator == ">" else Decimal(0))
+            return normalize_value_for_column(value, column, stats)
+        if check.operator in {"<", "<="}:
+            base = Decimal(str(check.min_value))
+            value = base - (Decimal(1) if check.operator == "<" else Decimal(0))
+            return normalize_value_for_column(value, column, stats)
+    return None
 
 
 def normalize_value_for_column(value, column, stats=None):
@@ -370,6 +421,54 @@ def _apply_catalog_relationships(table, row, index, generated, value_catalog, st
             stats.setdefault("relationship_rule_columns", set()).add(f"{table.name}.{column.name}")
 
 
+def _unique_adjusted_value(value, column, index, stats):
+    dtype = column.data_type.lower()
+    if _is_integer_type(column):
+        return normalize_value_for_column(index, column, stats)
+    if _is_numeric_type(column):
+        return normalize_value_for_column(index, column, stats)
+    if dtype.startswith("date"):
+        return SYNTHETIC_BASE_DATE + timedelta(days=index % 365)
+    if "timestamp" in dtype:
+        return datetime.combine(SYNTHETIC_BASE_DATE + timedelta(days=index % 365), datetime.min.time())
+    if "bool" in dtype:
+        return bool(index % 2)
+    return _bounded(f"{value} {index:03d}", column, stats)
+
+
+def _enforce_unique_constraints(table, row, seen_unique, index, stats):
+    column_lookup = {column.name: column for column in table.columns}
+    for unique in getattr(table, "unique_constraints", []):
+        if not unique.columns:
+            continue
+        key = tuple(row.get(col) for col in unique.columns)
+        seen = seen_unique[tuple(unique.columns)]
+        if key not in seen:
+            seen.add(key)
+            continue
+        for column_name in reversed(unique.columns):
+            column = column_lookup.get(column_name)
+            if column is None:
+                continue
+            row[column_name] = _unique_adjusted_value(row.get(column_name), column, index, stats)
+            break
+        seen.add(tuple(row.get(col) for col in unique.columns))
+
+
+def _apply_lifecycle_order(row):
+    if isinstance(row.get("order_date"), date) and isinstance(row.get("payment_date"), date):
+        if row["payment_date"] < row["order_date"]:
+            row["payment_date"] = row["order_date"]
+    promised = row.get("promised_delivery_time") or row.get("promised_timestamp")
+    actual = row.get("actual_delivery_time") or row.get("actual_timestamp")
+    if isinstance(promised, datetime) and isinstance(actual, datetime) and actual < promised:
+        delta = promised - actual
+        if "actual_delivery_time" in row:
+            row["actual_delivery_time"] = promised + delta
+        elif "actual_timestamp" in row:
+            row["actual_timestamp"] = promised + delta
+
+
 def _generic_label(prefix, index):
     return f"{prefix} {index:03d}"
 
@@ -392,6 +491,8 @@ def _fallback_value(fake, rng, table, column, index, stats):
         return _bounded(fake.country(), column, stats)
     if _is_date_key_column(column) and _is_integer_type(column):
         return _date_key_value(index)
+    if name.endswith("_id") and any(token in dtype for token in ["char", "text"]):
+        return _bounded(_business_id_value(column, index), column, stats)
     if any(token in name for token in ["customer_name", "employee_name", "patient_name", "person_name", "contact_name"]):
         return _bounded(fake.name(), column, stats)
     if "first_name" in name:
@@ -543,16 +644,23 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
 
     for table in table_generation_order(model):
         rows = []
+        seen_unique = defaultdict(set)
         for index in range(1, rows_per_table + 1):
             row = {}
             for column in table.columns:
                 if column.max_length and column.name not in stats["length_limited_columns"]:
                     stats["length_limited_columns"].append(column.name)
                 if column.is_primary_key:
-                    row[column.name] = _pk_value(column, index, table.name, stats)
+                    rule = get_catalog_rule(value_catalog, table.name, column.name)
+                    value = None
+                    if rule and not _is_integer_type(column):
+                        value = _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row)
+                    row[column.name] = value if value is not None else _pk_value(column, index, table.name, stats)
                     continue
+                value = _check_constraint_value(table, column, index, stats)
                 rule = get_catalog_rule(value_catalog, table.name, column.name)
-                value = _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row)
+                if value is None:
+                    value = _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row)
                 if value is None:
                     stats["fallback_columns_used"].add(f"{table.name}.{column.name}")
                     value = _fallback_value(fake, rng, table, column, index, stats)
@@ -564,6 +672,8 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
                 for child_col, parent_col in zip(fk.child_columns, fk.parent_columns):
                     row[child_col] = parent_row[parent_col]
             _apply_catalog_relationships(table, row, index, generated, value_catalog, stats)
+            _apply_lifecycle_order(row)
+            _enforce_unique_constraints(table, row, seen_unique, index, stats)
             rows.append(row)
         generated[table.name] = rows
     _finalize_calculations(model, generated, value_catalog, stats)

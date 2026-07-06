@@ -1,4 +1,7 @@
-from openpyxl import load_workbook
+import pytest
+
+openpyxl = pytest.importorskip("openpyxl")
+load_workbook = openpyxl.load_workbook
 
 from phase2.ddl_parser import parse_ddl
 from phase2.excel_writer import write_excel

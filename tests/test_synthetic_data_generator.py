@@ -104,3 +104,63 @@ CREATE TABLE numeric_values (
         assert abs(row["amount"].as_tuple().exponent) == 2
         assert abs(row["price"].as_tuple().exponent) == 2
         assert row["score"].as_tuple().exponent == 0
+
+
+def test_phase2_generates_analytical_data_without_catalog():
+    model = parse_ddl("""
+CREATE TABLE dim_customer (
+  customer_id varchar(20) PRIMARY KEY,
+  customer_name varchar(50),
+  customer_segment varchar(20) CHECK (customer_segment IN ('New', 'Premium'))
+);
+CREATE TABLE fact_sales (
+  sales_key integer PRIMARY KEY,
+  customer_id varchar(20) REFERENCES dim_customer(customer_id),
+  quantity integer CHECK (quantity BETWEEN 1 AND 10),
+  order_total_amount numeric(8,2)
+);
+""")
+    no_catalog = {"catalog_found": False, "markers_present": False, "warnings": [], "errors": [], "rule_count": 0, "catalog": {}}
+    data = generate_synthetic_data(model, rows_per_table=25, seed=1, value_catalog=no_catalog)
+    assert data["dim_customer"][0]["customer_id"].startswith("CUST-")
+    assert {row["customer_segment"] for row in data["dim_customer"]} <= {"New", "Premium"}
+    parent_ids = {row["customer_id"] for row in data["dim_customer"]}
+    assert {row["customer_id"] for row in data["fact_sales"]} <= parent_ids
+    assert validate_generated_data(model, data, 25, value_catalog=no_catalog)["status"] in {"passed", "passed_with_warnings"}
+
+
+def test_business_key_inference_generates_readable_ids_without_catalog():
+    model = parse_ddl("""
+CREATE TABLE business_keys (
+  customer_id varchar(30) PRIMARY KEY,
+  product_id varchar(30),
+  store_id varchar(30),
+  order_id varchar(40),
+  payment_id varchar(30),
+  delivery_id varchar(30)
+);
+""")
+    data = generate_synthetic_data(model, rows_per_table=1, seed=1)
+    row = data["business_keys"][0]
+    assert row["customer_id"] == "CUST-000001"
+    assert row["product_id"] == "PROD-000001"
+    assert row["store_id"] == "STORE-000001"
+    assert row["order_id"] == "ORDER-20260706-000001"
+    assert row["payment_id"] == "PAYMENT-000001"
+    assert row["delivery_id"] == "DELIVERY-000001"
+
+
+def test_composite_unique_constraints_are_respected_without_catalog():
+    model = parse_ddl("""
+CREATE TABLE dim_location (
+  location_key integer PRIMARY KEY,
+  city varchar(40),
+  region varchar(40),
+  country varchar(40),
+  UNIQUE (city, region, country)
+);
+""")
+    data = generate_synthetic_data(model, rows_per_table=40, seed=1)
+    tuples = {(row["city"], row["region"], row["country"]) for row in data["dim_location"]}
+    assert len(tuples) == 40
+    assert validate_generated_data(model, data, 40)["status"] == "passed"

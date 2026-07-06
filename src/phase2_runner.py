@@ -60,11 +60,18 @@ def main():
     value_catalog = None
 
     try:
-        load_yaml_file(args.yaml)
+        business_input = load_yaml_file(args.yaml)
         phase1_output = resolve_phase1_output(args.phase1_output)
         markdown = phase1_output.read_text(encoding="utf-8")
         ddl_text = extract_ddl(markdown)
         value_catalog = parse_synthetic_value_catalog(markdown)
+        value_catalog.setdefault("catalog", {}).setdefault("business_context", {
+            "business_name": business_input.get("business_name", ""),
+            "business_type": business_input.get("business_type", ""),
+            "model_purpose": business_input.get("model_purpose", ""),
+            "target_database": business_input.get("target_database", ""),
+            "synthetic_data_requirements": business_input.get("synthetic_data_requirements", {}),
+        })
         model = parse_ddl(ddl_text)
         data = generate_synthetic_data(model, args.rows_per_table, args.seed, value_catalog=value_catalog)
         pre_validation = validate_generated_data(model, data, args.rows_per_table, value_catalog=value_catalog)

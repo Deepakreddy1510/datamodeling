@@ -46,12 +46,12 @@ def test_validator_fails_numeric_scale_overflow_before_load():
     assert "numeric(5,2)" in result["errors"][0]
 
 
-def test_validator_fails_missing_catalog_for_analytical_tables():
+def test_validator_allows_missing_catalog_for_analytical_tables_with_warning():
     model = parse_ddl("CREATE TABLE dim_customer (customer_key integer PRIMARY KEY, customer_name varchar(50));")
     data = {"dim_customer": [{"customer_key": 1, "customer_name": "Alex Smith"}]}
     result = validate_generated_data(model, data, expected_rows=1, value_catalog={"catalog_found": False, "markers_present": False, "warnings": [], "errors": [], "rule_count": 0, "catalog": {}})
-    assert result["status"] == "failed"
-    assert any("Analytical DDL" in error for error in result["errors"])
+    assert result["status"] == "passed"
+    assert any("Analytical DDL" in warning for warning in result["catalog_parser_warnings"])
 
 
 def test_validator_fails_unique_constraint_violation():
