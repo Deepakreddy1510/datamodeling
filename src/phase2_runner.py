@@ -8,7 +8,6 @@ from phase2.excel_writer import write_excel
 from phase2.postgres_loader import load_to_postgres, validate_postgres_load
 from phase2.report_writer import write_generation_report, write_postgres_report, write_validation_report
 from phase2.synthetic_data_generator import SyntheticDataError, generate_synthetic_data
-from phase2.value_catalog_parser import parse_synthetic_value_catalog
 from phase2.validator import validate_generated_data
 from yaml_loader import load_yaml_file
 
@@ -57,24 +56,14 @@ def main():
         print("Error: --rows-per-table must be positive.", file=sys.stderr)
         return 1
 
-    value_catalog = None
-
     try:
         business_input = load_yaml_file(args.yaml)
         phase1_output = resolve_phase1_output(args.phase1_output)
         markdown = phase1_output.read_text(encoding="utf-8")
         ddl_text = extract_ddl(markdown)
-        value_catalog = parse_synthetic_value_catalog(markdown)
-        value_catalog.setdefault("catalog", {}).setdefault("business_context", {
-            "business_name": business_input.get("business_name", ""),
-            "business_type": business_input.get("business_type", ""),
-            "model_purpose": business_input.get("model_purpose", ""),
-            "target_database": business_input.get("target_database", ""),
-            "synthetic_data_requirements": business_input.get("synthetic_data_requirements", {}),
-        })
         model = parse_ddl(ddl_text)
-        data = generate_synthetic_data(model, args.rows_per_table, args.seed, value_catalog=value_catalog)
-        pre_validation = validate_generated_data(model, data, args.rows_per_table, value_catalog=value_catalog)
+        data = generate_synthetic_data(model, args.rows_per_table, args.seed)
+        pre_validation = validate_generated_data(model, data, args.rows_per_table)
         pre_validation["generation_stats"] = data.get("__stats__", {})
         pre_validation["excel_written"] = False
         if pre_validation["status"] == "failed":
@@ -87,7 +76,6 @@ def main():
                 rows_per_table=args.rows_per_table,
                 excel_output=args.excel_output,
                 validation=pre_validation,
-                value_catalog=value_catalog,
             )
             write_postgres_report(output_dir / "postgres_load_report.md", False, {})
             write_validation_report(output_dir / "validation_report.md", pre_validation)
@@ -105,7 +93,6 @@ def main():
             rows_per_table=args.rows_per_table,
             excel_output=args.excel_output,
             validation=pre_validation,
-            value_catalog=value_catalog,
         )
 
         post_validation = None
@@ -140,7 +127,6 @@ def main():
             rows_per_table=args.rows_per_table,
             excel_output=args.excel_output,
             validation=pre_validation,
-            value_catalog=value_catalog,
         )
         write_postgres_report(output_dir / "postgres_load_report.md", False, {})
         write_validation_report(output_dir / "validation_report.md", pre_validation)

@@ -14,7 +14,7 @@ def _overall_status(*statuses):
     return "passed"
 
 
-def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation, value_catalog=None):
+def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation):
     stats = validation.get("generation_stats", {})
     final_status = _overall_status(validation.get("status"), "passed_with_warnings" if getattr(model, "warnings", []) else None)
     lines = [
@@ -24,10 +24,7 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
         f"- Phase 1 output: `{phase1_output}`",
         f"- Excel output: `{excel_output}`",
         f"- Excel written in this run: {validation.get('excel_written', False)}",
-        f"- Rows per table: {rows_per_table}",
-        f"- Phase 1 catalog found: {bool((value_catalog or {}).get('catalog_found'))}",
-        f"- Catalog parsed: {bool((value_catalog or {}).get('catalog_found')) and not (value_catalog or {}).get('errors')}",
-        f"- Catalog table-column rules: {(value_catalog or {}).get('rule_count', 0)}", "",
+        f"- Rows per table: {rows_per_table}", "",
         "## DDL Extraction Summary", "",
         f"- Extracted DDL characters: {len(ddl_text)}",
         f"- Tables parsed: {len(model.tables)}", "",
@@ -62,24 +59,16 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     lines.extend(["", "### FK-like Columns Skipped Because No FK Exists in DDL", ""])
     lines.extend([f"- {item}" for item in validation.get("skipped_fk_like_columns", [])] or ["- None"])
 
-    lines.extend(["", "## Catalog Generation Strategy", ""])
-    lines.extend([f"- Catalog parser warning: {item}" for item in (value_catalog or {}).get("warnings", [])] or ["- Catalog parser warnings: None"])
-    lines.extend([f"- Catalog parser error: {item}" for item in (value_catalog or {}).get("errors", [])] or ["- Catalog parser errors: None"])
-    lines.append(f"- Columns generated using catalog: {len(stats.get('catalog_columns_used', []))}")
-    lines.append(f"- Columns generated using fallback: {len(stats.get('fallback_columns_used', []))}")
-    lines.append(f"- Catalog warning count: {len(stats.get('catalog_rule_warnings', [])) + len((value_catalog or {}).get('warnings', [])) + len((value_catalog or {}).get('errors', []))}")
-    lines.append(f"- Ignored / unsupported catalog rule count: {len(stats.get('unsupported_catalog_patterns', []))}")
+    lines.extend(["", "## DDL-Only Generation Strategy", ""])
+    lines.append(f"- Columns generated using DDL/name inference: {len(stats.get('fallback_columns_used', []))}")
     lines.append(f"- Fallback-to-DDL inference count: {stats.get('fallback_to_ddl_inference_count', 0)}")
     lines.append(f"- FK-safe unique adjustments: {len(stats.get('fk_safe_unique_adjustments', []))}")
     lines.append(f"- Composite unique adjustments: {len(stats.get('composite_unique_adjustments', []))}")
     lines.append(f"- Placeholder warning count: {len(validation.get('placeholder_warnings', []))}")
-    lines.append(f"- Unsupported calculation rule warnings: {len(stats.get('calculation_warnings', []))}")
-    lines.extend([f"  - unsupported calculation: {item}" for item in stats.get("calculation_warnings", [])])
-    lines.extend([f"  - unsupported catalog pattern: {item}" for item in stats.get("unsupported_catalog_patterns", [])])
-    lines.extend([f"  - catalog warning: {item}" for item in stats.get("catalog_rule_warnings", [])])
+    lines.append(f"- Calculation warning count: {len(stats.get('calculation_warnings', []))}")
+    lines.extend([f"  - calculation warning: {item}" for item in stats.get("calculation_warnings", [])])
     lines.extend([f"  - fk-safe unique adjustment: {item}" for item in stats.get("fk_safe_unique_adjustments", [])])
     lines.extend([f"  - composite unique adjustment: {item}" for item in stats.get("composite_unique_adjustments", [])])
-    lines.extend([f"  - catalog: {item}" for item in stats.get("catalog_columns_used", [])])
     lines.extend([f"  - fallback: {item}" for item in stats.get("fallback_columns_used", [])])
 
     lines.extend(["", "## Pre-load Validation", "", f"Status: **{validation['status']}**", ""])
@@ -111,7 +100,7 @@ def write_postgres_report(path, load_requested, result):
 def write_validation_report(path, pre_validation, post_validation=None):
     final_status = _overall_status(pre_validation.get("status"), post_validation.get("status") if post_validation else None)
     stats = pre_validation.get("generation_stats", {})
-    lines = ["# Validation Report", "", f"- Final status: **{final_status}**", f"- DDL validation status: **{'failed' if pre_validation.get('errors') else 'passed'}**", f"- Catalog found: {stats.get('catalog_found', False)}", f"- Catalog rule count: {stats.get('catalog_rule_count', 0)}", f"- Catalog rules checked: {pre_validation.get('catalog_rules_checked', 0)}", f"- Catalog columns used: {len(stats.get('catalog_columns_used', []))}", f"- Fallback columns used: {len(stats.get('fallback_columns_used', []))}", f"- Fallback-to-DDL inference count: {stats.get('fallback_to_ddl_inference_count', 0)}", f"- Catalog warning count: {len(pre_validation.get('catalog_parser_warnings', [])) + len(stats.get('catalog_rule_warnings', []))}", f"- Unsupported catalog patterns: {len(stats.get('unsupported_catalog_patterns', []))}", f"- Placeholder warning count: {len(pre_validation.get('placeholder_warnings', []))}", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
+    lines = ["# Validation Report", "", f"- Final status: **{final_status}**", f"- DDL validation status: **{'failed' if pre_validation.get('errors') else 'passed'}**", f"- Fallback inference count: {stats.get('fallback_to_ddl_inference_count', 0)}", f"- Placeholder warning count: {len(pre_validation.get('placeholder_warnings', []))}", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
     lines.extend([f"- {error}" for error in pre_validation.get("errors", [])] or ["- No validation errors."])
     lines.extend(["", "## FK Validation Coverage", "", "### Parsed FK Relationships", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("parsed_fk_relationships", [])] or ["- None"])
@@ -119,17 +108,9 @@ def write_validation_report(path, pre_validation, post_validation=None):
     lines.extend([f"- {item}" for item in pre_validation.get("checked_fk_relationships", [])] or ["- None"])
     lines.extend(["", "### FK-like Columns Skipped Because No Parsed FK Exists", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("skipped_fk_like_columns", [])] or ["- None"])
-    lines.extend(["", "## Catalog Parser Warnings", ""])
-    lines.extend([f"- {item}" for item in stats.get("catalog_warnings", [])] or ["- None"])
-    lines.extend(["", "## Catalog Parser Errors", ""])
-    lines.extend([f"- {item}" for item in stats.get("catalog_errors", [])] or ["- None"])
-    lines.extend(["", "## Ignored / Unsupported Catalog Rules", ""])
-    lines.extend([f"- {item}" for item in stats.get("unsupported_catalog_patterns", [])] or ["- None"])
     lines.extend(["", "## Unique Constraint Adjustments", ""])
     lines.extend([f"- FK-safe: {item}" for item in stats.get("fk_safe_unique_adjustments", [])] or ["- FK-safe: None"])
     lines.extend([f"- Composite: {item}" for item in stats.get("composite_unique_adjustments", [])] or ["- Composite: None"])
-    lines.extend(["", "## Catalog Compliance", ""])
-    lines.extend([f"- {item}" for item in pre_validation.get("catalog_compliance_errors", [])] or ["- No catalog compliance errors."])
     lines.extend(["", "## Data Type Validation", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("data_type_errors", [])] or ["- No data type errors."])
     lines.extend(["", "## Constraint Validation", ""])

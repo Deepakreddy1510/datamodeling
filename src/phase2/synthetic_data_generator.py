@@ -40,9 +40,6 @@ except ImportError:  # pragma: no cover - exercised when optional dependency is 
         def sentence(self, nb_words=8):
             return " ".join(self.word() for _ in range(nb_words)).capitalize() + "."
 
-from .value_catalog_parser import get_catalog_rule
-
-
 class SyntheticDataError(Exception):
     pass
 
@@ -127,9 +124,8 @@ def _table_prefix(table_name):
     return (letters[:12] or "ROW")
 
 
-def _catalog_warning(stats, category, message):
+def _generation_warning(stats, category, message):
     stats.setdefault(category, []).append(message)
-    stats.setdefault("catalog_rule_warnings", []).append(message)
 
 
 def _pk_value(column, index, table_name, stats):
@@ -317,52 +313,6 @@ def normalize_value_for_column(value, column, stats=None):
             return {"generated": True, "row_number": 1, "source": "synthetic", "value": str(value)}
     return _bounded(str(value), column, stats or {"truncated_values": 0})
 
-def _render_pattern(pattern, fake, table, column, index, stats, catalog, row=None):
-    context = (catalog or {}).get("business_context", {}) if isinstance(catalog, dict) else {}
-    date_text = (SYNTHETIC_BASE_DATE + timedelta(days=(index - 1) % 365)).strftime("%Y%m%d")
-    entity_name = table.name.replace("dim_", "").replace("fact_", "").replace("stg_", "").replace("load_", "").replace("_raw", "")
-    replacements = {
-        "business_name": context.get("business_name", "Business"),
-        "table_name": table.name,
-        "column_name": column.name,
-        "entity_name": entity_name,
-        "number": f"{index:03d}",
-        "row_number": f"{index:03d}",
-        "line_number": str(((index - 1) % 5) + 1),
-        "sequence": f"{index:06d}",
-        "batch_number": f"BATCH-{index:06d}",
-        "YYYYMMDD": date_text,
-        "first_name": fake.first_name(),
-        "last_name": fake.last_name(),
-        "city": fake.city(),
-        "category": "Category",
-        "order_id": (row or {}).get("order_id", f"ORD-{date_text}-{index:06d}"),
-    }
-    value = pattern
-    if value == "YYYYMMDD":
-        value = date_text
-    value = re.sub(r"\{0[0-9]*\}", lambda match: f"{index:0{len(match.group(0)) - 2}d}", value)
-    value = re.sub(r"\{(\d+)\s*-?\s*digit\s+number\}", lambda match: f"{index:0{int(match.group(1))}d}", value, flags=re.IGNORECASE)
-    word_widths = {"six": 6, "eight": 8, "ten": 10, "four": 4}
-    value = re.sub(
-        r"\{(six|eight|ten|four)\s+digit\s+number\}",
-        lambda match: f"{index:0{word_widths[match.group(1).lower()]}d}",
-        value,
-        flags=re.IGNORECASE,
-    )
-    for key, replacement in replacements.items():
-        value = value.replace("{" + key + "}", str(replacement))
-    if "{" in value or "}" in value:
-        _catalog_warning(
-            stats,
-            "unsupported_catalog_patterns",
-            f"{table.name}.{column.name}: unsupported value_pattern {pattern!r}; used DDL semantic fallback.",
-        )
-        return None
-    return normalize_value_for_column(value, column, stats)
-
-
-
 def _date_from_rule(rule_text, row, index, rng, stats):
     text = str(rule_text or "").strip().lower()
     between_match = re.search(r"between\s+(\d{4}-\d{2}-\d{2})\s+and\s+(\d{4}-\d{2}-\d{2})", text)
@@ -410,73 +360,6 @@ def _boolean_from_rule(rule_text, row, index, stats):
     else:
         outcome = str(actual).strip().lower() != raw_expected.strip().lower()
     return outcome if expected_bool.lower() == "true" else not outcome
-
-def _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row=None):
-    if not rule:
-        return None
-    stats["catalog_columns_used"].add(f"{table.name}.{column.name}")
-    allowed = rule.get("allowed_values") or []
-    if allowed:
-        return normalize_value_for_column(_cycle(allowed, index, column, stats), column, stats)
-    examples = rule.get("value_examples") or []
-    if examples:
-        return normalize_value_for_column(_cycle(examples, index, column, stats), column, stats)
-    pattern = rule.get("value_pattern")
-    if pattern:
-        rendered_value = _render_pattern(str(pattern), fake, table, column, index, stats, catalog, row)
-        if rendered_value is not None:
-            return rendered_value
-    if rule.get("numeric_min") is not None or rule.get("numeric_max") is not None:
-        if any(token in column.data_type.lower() for token in ["int", "serial"]):
-            min_value = int(rule.get("numeric_min") if rule.get("numeric_min") is not None else 1)
-            max_value = int(rule.get("numeric_max") if rule.get("numeric_max") is not None else 100)
-            return normalize_value_for_column(rng.randint(min_value, max(max_value, min_value)), column, stats)
-        return normalize_value_for_column(_numeric_value(rng, column, stats, rule.get("numeric_min"), rule.get("numeric_max")), column, stats)
-    if rule.get("boolean_rule"):
-        return normalize_value_for_column(_boolean_from_rule(rule.get("boolean_rule"), row or {}, index, stats), column, stats)
-    if rule.get("date_rule"):
-        return normalize_value_for_column(_date_from_rule(rule.get("date_rule"), row or {}, index, rng, stats), column, stats)
-    return None
-
-
-def _relationship_parent_for_column(column, rule, generated):
-    relationship = str((rule or {}).get("relationship_rule") or "").lower()
-    column_name = column.name.lower()
-    explicit = re.search(r"(dim_[a-zA-Z0-9_]+)\.([a-zA-Z_][a-zA-Z0-9_]*)", relationship)
-    if explicit:
-        table_name, parent_column = explicit.groups()
-        for generated_table in generated:
-            if generated_table.lower() == table_name.lower():
-                return generated_table, parent_column
-    if _is_date_key_column(column):
-        for generated_table in generated:
-            if generated_table.lower().endswith("dim_date"):
-                return generated_table, "date_key"
-    if column_name.endswith("_key"):
-        base = column_name[:-4]
-        expected = f"dim_{base}"
-        for generated_table in generated:
-            if generated_table.lower().endswith(expected):
-                return generated_table, column.name
-    return None, None
-
-
-def _apply_catalog_relationships(table, row, index, generated, value_catalog, stats):
-    for column in table.columns:
-        rule = get_catalog_rule(value_catalog, table.name, column.name)
-        if not rule and not _is_date_key_column(column):
-            continue
-        parent_table, parent_column = _relationship_parent_for_column(column, rule, generated)
-        if not parent_table or parent_table not in generated:
-            continue
-        parent_rows = generated[parent_table]
-        if not parent_rows:
-            continue
-        parent_row = parent_rows[(index - 1) % len(parent_rows)]
-        if parent_column in parent_row:
-            row[column.name] = normalize_value_for_column(parent_row[parent_column], column, stats)
-            stats.setdefault("relationship_rule_columns", set()).add(f"{table.name}.{column.name}")
-
 
 def _unique_adjusted_value(value, column, index, stats):
     dtype = column.data_type.lower()
@@ -530,18 +413,8 @@ def _is_check_in_constrained(table, column_name):
     )
 
 
-def _is_sticky_single_value_hint(table, column_name, value_catalog):
-    """Prefer not to mutate single-value catalog hints for generic domain anchors.
-
-    Catalog values are optional hints, not strict constraints. This helper only
-    affects repair ordering so a single stable anchor such as country, currency,
-    tenant, or market remains stable when another non-strict column can be
-    varied to satisfy a composite UNIQUE constraint.
-    """
-    rule = get_catalog_rule(value_catalog, table.name, column_name)
-    values = (rule or {}).get("allowed_values") or []
-    if len(values) != 1:
-        return False
+def _is_sticky_domain_anchor(column_name):
+    """Prefer stable anchor columns as a last resort during UNIQUE repair."""
     name = column_name.lower()
     return any(anchor in name for anchor in ["country", "currency", "tenant", "market", "locale"])
 
@@ -605,7 +478,7 @@ def _try_rotate_fk_value(table, row, unique_columns, column_name, generated, see
     return False
 
 
-def _enforce_unique_constraints(table, row, seen_unique, index, stats, generated, value_catalog):
+def _enforce_unique_constraints(table, row, seen_unique, index, stats, generated):
     column_lookup = {column.name: column for column in table.columns}
     for unique in getattr(table, "unique_constraints", []):
         if not unique.columns:
@@ -630,7 +503,7 @@ def _enforce_unique_constraints(table, row, seen_unique, index, stats, generated
             column = column_lookup.get(column_name)
             if column is None or _fk_parent_for_child(table, column_name)[0] or _is_check_in_constrained(table, column_name):
                 continue
-            if _is_sticky_single_value_hint(table, column_name, value_catalog):
+            if _is_sticky_domain_anchor(column_name):
                 sticky_columns.append((column_name, column))
             else:
                 candidate_columns.append((column_name, column))
@@ -645,7 +518,7 @@ def _enforce_unique_constraints(table, row, seen_unique, index, stats, generated
             if adjusted:
                 break
         if not adjusted:
-            _catalog_warning(
+            _generation_warning(
                 stats,
                 "unique_adjustment_warnings",
                 f"{table.name}: exhausted safe values for UNIQUE({', '.join(unique.columns)}); preserved DDL-safe FK/constrained values.",
@@ -724,6 +597,8 @@ def _fallback_value(fake, rng, table, column, index, stats):
         return rng.randint(1, 1000)
     if _is_numeric_type(column):
         return _numeric_value(rng, column, stats)
+    if any(token in dtype for token in ["char", "text"]):
+        return _bounded(_generic_label(title, index), column, stats)
     if any(word in name for word in ["amount", "price", "cost", "total", "rate", "score", "percentage", "ratio", "value"]):
         return _numeric_value(rng, column, stats, 0, 100 if any(word in name for word in ["rate", "percentage", "ratio", "score"]) else None)
     if any(word in name for word in ["quantity", "count", "number"]):
@@ -747,68 +622,41 @@ def _to_decimal(value):
         return None
 
 
-def _apply_calculation_rule(rule, row, column, stats):
-    if not rule:
-        return None
-    calculation = str(rule.get("calculation_rule") or "").strip()
-    if not calculation:
-        return None
+def _infer_calculated_value(row, column):
+    name = column.name.lower()
+    quantity = _to_decimal(row.get("quantity"))
+    unit_price = _to_decimal(row.get("unit_price"))
+    price = _to_decimal(row.get("price"))
+    cost = _to_decimal(row.get("cost"))
+    revenue = _to_decimal(row.get("revenue"))
 
-    flag_match = re.search(
-        r"(?:flag\s+)?true\s+when\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*['\"]?([^'\"]+)['\"]?",
-        calculation,
-        re.IGNORECASE,
-    )
-    if flag_match and ("bool" in column.data_type.lower() or column.name.lower().endswith("flag") or column.name.lower().startswith("is_")):
-        source_name, expected = flag_match.groups()
-        return str(row.get(source_name, "")).strip().lower() == expected.strip().lower()
-
-    if "=" not in calculation:
-        return None
-    target, expression = [part.strip() for part in calculation.split("=", 1)]
-    if target.lower() != column.name.lower():
-        return None
-
-    percentage_match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*/\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\*\s*100", expression, re.IGNORECASE)
-    if percentage_match:
-        numerator = _to_decimal(row.get(percentage_match.group(1)))
-        denominator = _to_decimal(row.get(percentage_match.group(2)))
-        if numerator is not None and denominator not in (None, Decimal("0")):
-            return (numerator / denominator) * Decimal("100")
-        return None
-
-    delay_match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*-\s*([a-zA-Z_][a-zA-Z0-9_]*)", expression)
-    if delay_match and "minute" in column.name.lower():
-        left = row.get(delay_match.group(1))
-        right = row.get(delay_match.group(2))
-        if isinstance(left, datetime) and isinstance(right, datetime):
-            return int((left - right).total_seconds() // 60)
-
-    match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*([*+\-/])\s*([a-zA-Z_][a-zA-Z0-9_]*)", expression)
-    if not match:
-        stats["calculation_warnings"].append(f"Unsupported calculation rule for {column.name}: {calculation}")
-        return None
-    left_name, operator, right_name = match.groups()
-    left = _to_decimal(row.get(left_name))
-    right = _to_decimal(row.get(right_name))
-    if left is None or right is None:
-        return None
-    if operator == "*":
-        return left * right
-    if operator == "+":
-        return left + right
-    if operator == "-":
-        return left - right
-    if operator == "/" and right != 0:
-        return left / right
+    if name in {"line_total_amount", "line_total", "total_amount"} and quantity is not None and unit_price is not None:
+        return quantity * unit_price
+    if "amount" in name and quantity is not None and price is not None:
+        return quantity * price
+    if "revenue" in name and quantity is not None and price is not None:
+        return quantity * price
+    if "margin" in name and revenue is not None and cost is not None:
+        return revenue - cost
+    if "delay" in name and "minute" in name:
+        actual = row.get("actual_delivery_time") or row.get("actual_timestamp") or row.get("end_time")
+        promised = row.get("promised_delivery_time") or row.get("promised_timestamp") or row.get("start_time")
+        if isinstance(actual, datetime) and isinstance(promised, datetime):
+            return max(0, int((actual - promised).total_seconds() // 60))
+    if name in {"is_delayed", "delayed_flag"}:
+        delay = _to_decimal(row.get("delivery_delay_minutes") or row.get("delay_minutes"))
+        if delay is not None:
+            return delay > 0
+    if name in {"is_current", "current_flag"}:
+        return row.get("effective_end_date") in (None, "")
     return None
 
-def _finalize_calculations(model, generated, value_catalog, stats):
+
+def _finalize_calculations(model, generated, stats):
     for table in model.tables:
         for row in generated.get(table.name, []):
             for column in table.columns:
-                rule = get_catalog_rule(value_catalog, table.name, column.name)
-                value = _apply_calculation_rule(rule, row, column, stats)
+                value = _infer_calculated_value(row, column)
                 if value is not None:
                     if column.numeric_precision is not None or column.numeric_scale is not None:
                         scale = column.numeric_scale or 0
@@ -817,38 +665,26 @@ def _finalize_calculations(model, generated, value_catalog, stats):
                     stats["calculated_columns"].add(f"{table.name}.{column.name}")
 
 
-def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog=None):
+def generate_synthetic_data(model, rows_per_table=100, seed=12345):
     fake = Faker()
     Faker.seed(seed)
     rng = random.Random(seed)
     generated = {}
     table_map = model.table_map()
-    catalog = (value_catalog or {}).get("catalog", value_catalog or {})
     stats = {
         "truncated_values": 0,
         "numeric_bounded_values": 0,
         "length_limited_columns": [],
-        "catalog_found": bool((value_catalog or {}).get("catalog_found")),
-        "catalog_rule_count": (value_catalog or {}).get("rule_count", 0),
-        "catalog_columns_used": set(),
         "fallback_columns_used": set(),
         "fallback_to_ddl_inference_count": 0,
-        "catalog_warnings": list((value_catalog or {}).get("warnings", [])),
-        "catalog_errors": list((value_catalog or {}).get("errors", [])),
-        "catalog_rule_warnings": [],
-        "unsupported_catalog_patterns": [],
         "unique_adjustment_warnings": [],
         "fk_safe_unique_adjustments": set(),
         "composite_unique_adjustments": set(),
         "primary_key_repairs": set(),
         "generic_fallback_values": 0,
         "calculated_columns": set(),
-        "relationship_rule_columns": set(),
         "calculation_warnings": [],
-        "date_rule_warnings": [],
-        "boolean_rule_warnings": [],
         "type_normalization_warnings": [],
-        "business_name": ((catalog or {}).get("business_context", {}) if isinstance(catalog, dict) else {}).get("business_name", ""),
     }
 
     for table in table_generation_order(model):
@@ -862,16 +698,9 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
                 if column.max_length and column.name not in stats["length_limited_columns"]:
                     stats["length_limited_columns"].append(column.name)
                 if column.is_primary_key:
-                    rule = get_catalog_rule(value_catalog, table.name, column.name)
-                    value = None
-                    if rule and not _is_integer_type(column):
-                        value = _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row)
-                    row[column.name] = value if value is not None else _pk_value(column, index, table.name, stats)
+                    row[column.name] = _pk_value(column, index, table.name, stats)
                     continue
                 value = _check_constraint_value(table, column, index, stats)
-                rule = get_catalog_rule(value_catalog, table.name, column.name)
-                if value is None:
-                    value = _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row)
                 if value is None:
                     stats["fallback_columns_used"].add(f"{table.name}.{column.name}")
                     stats["fallback_to_ddl_inference_count"] += 1
@@ -883,17 +712,14 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
                 parent_row = parent_rows[(index - 1) % len(parent_rows)]
                 for child_col, parent_col in zip(fk.child_columns, fk.parent_columns):
                     row[child_col] = parent_row[parent_col]
-            _apply_catalog_relationships(table, row, index, generated, value_catalog, stats)
             _apply_lifecycle_order(row)
             _enforce_primary_key(table, row, seen_primary_keys, index, stats)
-            _enforce_unique_constraints(table, row, seen_unique, index, stats, generated, value_catalog)
+            _enforce_unique_constraints(table, row, seen_unique, index, stats, generated)
             rows.append(row)
         generated[table.name] = rows
-    _finalize_calculations(model, generated, value_catalog, stats)
-    stats["catalog_columns_used"] = sorted(stats["catalog_columns_used"])
+    _finalize_calculations(model, generated, stats)
     stats["fallback_columns_used"] = sorted(stats["fallback_columns_used"])
     stats["calculated_columns"] = sorted(stats["calculated_columns"])
-    stats["relationship_rule_columns"] = sorted(stats["relationship_rule_columns"])
     stats["fk_safe_unique_adjustments"] = sorted(stats["fk_safe_unique_adjustments"])
     stats["composite_unique_adjustments"] = sorted(stats["composite_unique_adjustments"])
     stats["primary_key_repairs"] = sorted(stats["primary_key_repairs"])

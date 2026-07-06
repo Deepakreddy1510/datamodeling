@@ -91,25 +91,6 @@ class MockCodexClient:
         return json.dumps(response, indent=2)
 
     def run_generation(self, prompt_text):
-        catalog = {
-            "business_context": {
-                "business_name": "Mock Business",
-                "business_type": "Retail",
-                "model_purpose": "Mock analytical model",
-                "target_database": "PostgreSQL",
-            },
-            "table_column_rules": [
-                {"table_name": "load_customer_raw", "column_name": "customer_id", "semantic_role": "primary_key", "data_type": "integer", "numeric_min": 1, "numeric_max": 1000, "allowed_values": [], "value_examples": [], "value_pattern": "", "date_rule": "", "boolean_rule": "", "calculation_rule": "", "relationship_rule": "", "nullable_rule": "not_null", "uniqueness_rule": "unique", "business_reason": "Mock raw customer identifier."},
-                {"table_name": "stg_customer", "column_name": "customer_id", "semantic_role": "business_key", "data_type": "integer", "numeric_min": 1, "numeric_max": 1000, "allowed_values": [], "value_examples": [], "value_pattern": "", "date_rule": "", "boolean_rule": "", "calculation_rule": "", "relationship_rule": "", "nullable_rule": "not_null", "uniqueness_rule": "unique", "business_reason": "Mock staged customer identifier."},
-                {"table_name": "dim_customer", "column_name": "customer_key", "semantic_role": "surrogate_key", "data_type": "integer", "numeric_min": 1, "numeric_max": 1000, "allowed_values": [], "value_examples": [], "value_pattern": "", "date_rule": "", "boolean_rule": "", "calculation_rule": "", "relationship_rule": "", "nullable_rule": "not_null", "uniqueness_rule": "unique", "business_reason": "Mock customer surrogate key."},
-                {"table_name": "dim_customer", "column_name": "customer_id", "semantic_role": "business_key", "data_type": "integer", "numeric_min": 1, "numeric_max": 1000, "allowed_values": [], "value_examples": [], "value_pattern": "", "date_rule": "", "boolean_rule": "", "calculation_rule": "", "relationship_rule": "", "nullable_rule": "not_null", "uniqueness_rule": "", "business_reason": "Mock customer natural key."},
-                {"table_name": "fact_sales", "column_name": "sales_key", "semantic_role": "surrogate_key", "data_type": "integer", "numeric_min": 1, "numeric_max": 1000, "allowed_values": [], "value_examples": [], "value_pattern": "", "date_rule": "", "boolean_rule": "", "calculation_rule": "", "relationship_rule": "", "nullable_rule": "not_null", "uniqueness_rule": "unique", "business_reason": "Mock fact surrogate key."},
-                {"table_name": "fact_sales", "column_name": "customer_key", "semantic_role": "foreign_key", "data_type": "integer", "numeric_min": 1, "numeric_max": 1000, "allowed_values": [], "value_examples": [], "value_pattern": "", "date_rule": "", "boolean_rule": "", "calculation_rule": "", "relationship_rule": "References dim_customer.customer_key", "nullable_rule": "not_null", "uniqueness_rule": "", "business_reason": "Mock fact-to-customer relationship."},
-                {"table_name": "fact_sales", "column_name": "order_total_amount", "semantic_role": "measure", "data_type": "numeric(10,2)", "numeric_min": 10, "numeric_max": 500, "allowed_values": [], "value_examples": [], "value_pattern": "", "date_rule": "", "boolean_rule": "", "calculation_rule": "", "relationship_rule": "", "nullable_rule": "not_null", "uniqueness_rule": "", "business_reason": "Mock bounded sales amount."},
-            ],
-            "business_rules": [],
-            "generation_assumptions": ["Mock catalog for tests."],
-        }
         final_output = (
             "# Business Input Summary\n\nMock generated output.\n\n"
             "# SQL DDL\n\n```sql\n"
@@ -117,11 +98,8 @@ class MockCodexClient:
             "CREATE TABLE stg_customer (customer_id integer PRIMARY KEY);\n"
             "CREATE TABLE dim_customer (customer_key integer PRIMARY KEY, customer_id integer);\n"
             "CREATE TABLE fact_sales (sales_key integer PRIMARY KEY, customer_key integer REFERENCES dim_customer(customer_key), order_total_amount numeric(10,2));\n"
+            "CREATE VIEW reporting_sales_summary AS SELECT customer_key, SUM(order_total_amount) AS total_amount FROM fact_sales GROUP BY customer_key;\n"
             "```\n\n# Fact Grain\n\nfact_sales = one row per order item.\n\n"
-            "# Synthetic Data Value Catalog\n\n"
-            "BEGIN_SYNTHETIC_VALUE_CATALOG_JSON\n"
-            f"{json.dumps(catalog, indent=2)}\n"
-            "END_SYNTHETIC_VALUE_CATALOG_JSON\n\n"
             "# AI Additions / Assumptions\n\n"
             "| Added Item | Type | Reason | Mandatory / Optional |\n"
             "|---|---|---|---|\n"
@@ -140,6 +118,3 @@ class MockCodexClient:
             ],
         }
         return json.dumps(response, indent=2)
-
-    def run_catalog_repair(self, prompt_text):
-        return self.run_generation(prompt_text)

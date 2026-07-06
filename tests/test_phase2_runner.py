@@ -1,72 +1,54 @@
-import sys
-import types
+import pytest
 
-sys.modules.setdefault("openpyxl", types.SimpleNamespace(Workbook=object))
-sys.modules.setdefault("openpyxl.styles", types.SimpleNamespace(Font=lambda **kwargs: None))
+pytest.importorskip("openpyxl")
+
 import phase2_runner
 
 
-def test_phase2_dry_run_handles_date_key_catalog_patterns(tmp_path, monkeypatch):
-    yaml_path = tmp_path / "business.yaml"
-    yaml_path.write_text(
-        """
-business_name: Demo
-business_type: Retail
-business_description: Demo analytical model.
-model_purpose: Reporting
-main_business_processes: [Sales]
-key_business_entities: [Date, Sales]
-business_relationships: [Sales occur on dates]
-entity_attributes: {Date: [date_key], Sales: [sales_key, order_date_key]}
-reporting_requirements: [Sales by date]
-target_database: PostgreSQL
-expected_output: Data warehouse
-""",
-        encoding="utf-8",
-    )
+def test_phase2_dry_run_generates_excel_and_reports_from_ddl_only(tmp_path, monkeypatch):
+    yaml_path = tmp_path / "input.yaml"
+    yaml_path.write_text("business_name: Demo\ntarget_database: PostgreSQL\n", encoding="utf-8")
     phase1_output = tmp_path / "final_output.md"
     phase1_output.write_text(
         """
 # SQL DDL
 ```sql
-CREATE TABLE dim_date (date_key integer PRIMARY KEY, full_date date);
+CREATE TABLE dim_date (
+  date_key integer PRIMARY KEY,
+  full_date date NOT NULL,
+  day_name varchar(20)
+);
+CREATE TABLE dim_customer (
+  customer_key integer PRIMARY KEY,
+  customer_id varchar(20) UNIQUE,
+  customer_name varchar(60) NOT NULL,
+  customer_segment varchar(20) CHECK (customer_segment IN ('New', 'Premium'))
+);
 CREATE TABLE fact_sales (
   sales_key integer PRIMARY KEY,
-  order_date_key integer
+  customer_key integer REFERENCES dim_customer(customer_key),
+  order_date_key integer REFERENCES dim_date(date_key),
+  quantity integer CHECK (quantity BETWEEN 1 AND 10),
+  unit_price numeric(8,2) CHECK (unit_price > 0),
+  line_total_amount numeric(10,2),
+  UNIQUE (customer_key, order_date_key)
 );
 ```
-
-# Synthetic Data Value Catalog
-BEGIN_SYNTHETIC_VALUE_CATALOG_JSON
-{
-  "business_context": {"business_name": "Demo"},
-  "table_column_rules": [
-    {"table_name": "dim_date", "column_name": "date_key", "value_pattern": "YYYYMMDD"},
-    {"table_name": "dim_date", "column_name": "full_date", "date_rule": "between 2026-07-06 and 2026-07-10"},
-    {"table_name": "fact_sales", "column_name": "order_date_key", "relationship_rule": "choose existing dim_date.date_key"}
-  ],
-  "business_rules": [],
-  "generation_assumptions": []
-}
-END_SYNTHETIC_VALUE_CATALOG_JSON
+# AI Additions / Assumptions
 """,
         encoding="utf-8",
     )
-    excel_output = tmp_path / "synthetic.xlsx"
-    output_dir = tmp_path / "reports"
-    wrote_excel = {}
-    monkeypatch.setattr(phase2_runner, "write_excel", lambda model, data, path: wrote_excel.setdefault("path", path))
-    monkeypatch.setattr(sys, "argv", [
+    excel_path = tmp_path / "synthetic.xlsx"
+    args = [
         "phase2_runner.py",
         "--yaml", str(yaml_path),
         "--phase1-output", str(phase1_output),
-        "--output-dir", str(output_dir),
-        "--rows-per-table", "3",
-        "--excel-output", str(excel_output),
+        "--rows-per-table", "5",
+        "--excel-output", str(excel_path),
+        "--output-dir", str(tmp_path),
         "--no-load-to-postgres",
-    ])
-
+    ]
+    monkeypatch.setattr("sys.argv", args)
     assert phase2_runner.main() == 0
-    assert wrote_excel["path"] == str(excel_output)
-    assert (output_dir / "synthetic_data_generation_report.md").exists()
-    assert (output_dir / "validation_report.md").exists()
+    assert excel_path.exists()
+    assert "Final status: **passed" in (tmp_path / "validation_report.md").read_text(encoding="utf-8")

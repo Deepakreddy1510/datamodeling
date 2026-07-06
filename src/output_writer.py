@@ -17,9 +17,6 @@ KNOWN_GENERATED_FILES = [
     "final_output.md",
     "generation_quality_report.json",
     "generation_quality_report.md",
-    "catalog_repair_prompt.md",
-    "catalog_repair_response_raw.txt",
-    "catalog_repair_response.json",
     "validation_errors.json",
     "validation_errors.md",
     "error.json",
@@ -148,34 +145,18 @@ def write_generation_quality_report_markdown(output_dir, quality_report):
     lines.extend([f"- {error}" for error in quality_report.get("errors", [])] or ["- None"])
     lines.extend(["", "## Warnings", ""])
     lines.extend([f"- {warning}" for warning in quality_report.get("warnings", [])] or ["- None"])
-    repair = quality_report.get("repair", {})
-    if repair:
-        lines.extend([
-            "", "## Catalog Repair", "",
-            f"- Catalog repair attempted: {repair.get('catalog_repair_attempted', False)}",
-            f"- Repair attempt count: {repair.get('repair_attempt_count', 0)}",
-            f"- Catalog repair status: {repair.get('catalog_repair_status', 'not_attempted')}",
-            f"- Original generation status: {repair.get('original_generation_status')}",
-            f"- Repaired generation status: {repair.get('repaired_generation_status')}",
-            f"- Catalog coverage before repair: {repair.get('catalog_coverage_before_repair')}",
-            f"- Catalog coverage after repair: {repair.get('catalog_coverage_after_repair')}",
-            f"- Final output written: {repair.get('final_output_written', False)}",
-            "", "### Missing Rules Before Repair", "",
-        ])
-        lines.extend([f"- {item}" for item in repair.get("missing_rules_before_repair", [])] or ["- None"])
-        lines.extend(["", "### Missing Rules After Repair", ""])
-        lines.extend([f"- {item}" for item in repair.get("missing_rules_after_repair", [])] or ["- None"])
     checks = quality_report.get("checks", {})
     lines.extend([
         "", "## Summary", "",
         f"- Model intent: `{checks.get('model_type', 'unknown')}`",
         f"- Required layers: `{checks.get('required_layers', [])}`",
-        f"- Catalog parsed: {checks.get('catalog_parsed', False)}",
-        f"- Catalog rule count: {checks.get('catalog_rule_count', 0)}",
-        f"- Catalog coverage percentage: {checks.get('catalog_coverage_percentage', 0)}",
-        "", "## Missing Important Catalog Rules", "",
+        f"- DDL present: {checks.get('ddl_present', False)}",
+        f"- Load tables present: {checks.get('load_tables_present', False)}",
+        f"- Staging tables present: {checks.get('staging_tables_present', False)}",
+        f"- Dimension tables present: {checks.get('dimension_tables_present', False)}",
+        f"- Fact tables present: {checks.get('fact_tables_present', False)}",
+        f"- Reporting views present: {checks.get('reporting_views_present', False)}",
     ])
-    lines.extend([f"- {item}" for item in checks.get("missing_catalog_rules", [])] or ["- None"])
     lines.extend(["", "## Checks", "", "| Check | Passed / Value |", "|---|---:|"])
     for name, value in checks.items():
         lines.append(f"| {name} | {value} |")

@@ -3,7 +3,6 @@ import json
 import sys
 from pathlib import Path
 
-from catalog_repair import attach_repair_metadata, build_catalog_repair_prompt, is_catalog_repairable_quality_failure
 from codex_runner import CodexCLIClient, MockCodexClient
 from final_score import calculate_final_score
 from generation_quality_validator import validate_generation_quality
@@ -52,12 +51,6 @@ def get_raw_semantic_response(args, prompt_text):
 def get_raw_generation_response(args, prompt_text):
     if args.mock_codex:
         return MockCodexClient(args.mock_ai_score).run_generation(prompt_text)
-    return CodexCLIClient().run_prompt(prompt_text)
-
-
-def get_raw_catalog_repair_response(args, prompt_text):
-    if args.mock_codex:
-        return MockCodexClient(args.mock_ai_score).run_catalog_repair(prompt_text)
     return CodexCLIClient().run_prompt(prompt_text)
 
 
@@ -141,37 +134,6 @@ def main():
         generation_response = validate_generation_response(parse_json_response(raw_generation))
         write_json(output_dir / "codex_generation_response.json", generation_response)
         quality_report = validate_generation_quality(generation_response, model_intent, model_blueprint)
-        attach_repair_metadata(
-            quality_report,
-            attempted=False,
-            attempt_count=0,
-            original_report=quality_report,
-            final_output_written=quality_report["status"] != "failed",
-        )
-        if quality_report["status"] == "failed" and is_catalog_repairable_quality_failure(quality_report):
-            original_quality_report = quality_report
-            catalog_repair_prompt = build_catalog_repair_prompt(
-                Path(args.input).read_text(encoding="utf-8"),
-                generation_response["final_output_markdown"],
-                original_quality_report,
-            )
-            write_text(output_dir / "catalog_repair_prompt.md", catalog_repair_prompt)
-            raw_repair = get_raw_catalog_repair_response(args, catalog_repair_prompt)
-            write_text(output_dir / "catalog_repair_response_raw.txt", raw_repair)
-            repair_response = validate_generation_response(parse_json_response(raw_repair))
-            write_json(output_dir / "catalog_repair_response.json", repair_response)
-            repaired_quality_report = validate_generation_quality(repair_response, model_intent, model_blueprint)
-            attach_repair_metadata(
-                repaired_quality_report,
-                attempted=True,
-                attempt_count=1,
-                original_report=original_quality_report,
-                repaired_report=repaired_quality_report,
-                final_output_written=repaired_quality_report["status"] != "failed",
-            )
-            quality_report = repaired_quality_report
-            generation_response = repair_response
-
         _write_quality_report(output_dir, quality_report)
         if quality_report["status"] == "failed":
             print("Generation quality validation failed. See output/generation_quality_report.md.", file=sys.stderr)

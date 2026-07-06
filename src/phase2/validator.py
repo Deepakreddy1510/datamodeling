@@ -3,7 +3,6 @@ from decimal import Decimal, InvalidOperation
 import json
 import re
 
-from .value_catalog_parser import get_catalog_rule
 
 
 class Phase2ValidationError(Exception):
@@ -34,97 +33,6 @@ def _decimal(value):
 
 def _is_placeholder(value):
     return isinstance(value, str) and bool(re.fullmatch(r"[a-z_]+_\d{3}", value.lower()))
-
-
-def _normalize_rule_value(value, column):
-    dtype = column.data_type.lower()
-    if value is None:
-        return None
-    try:
-        if any(token in dtype for token in ["int", "serial"]):
-            return int(Decimal(str(value)))
-        if any(token in dtype for token in ["numeric", "decimal", "double", "float", "real"]):
-            decimal_value = Decimal(str(value))
-            if column.numeric_scale is not None:
-                decimal_value = decimal_value.quantize(Decimal(1).scaleb(-column.numeric_scale) if column.numeric_scale else Decimal(1))
-            return decimal_value
-        if "bool" in dtype:
-            if isinstance(value, bool):
-                return value
-            normalized = str(value).strip().lower()
-            if normalized in {"true", "yes", "1", "y"}:
-                return True
-            if normalized in {"false", "no", "0", "n"}:
-                return False
-        if dtype.startswith("date"):
-            if isinstance(value, date) and not isinstance(value, datetime):
-                return value
-            return datetime.fromisoformat(str(value)).date()
-        if dtype.startswith("time") and "timestamp" not in dtype:
-            if isinstance(value, dt_time):
-                return value
-            return dt_time.fromisoformat(str(value))
-        if "timestamp" in dtype or "timestamptz" in dtype:
-            if isinstance(value, datetime):
-                return value
-            return datetime.fromisoformat(str(value))
-    except (InvalidOperation, TypeError, ValueError):
-        return value
-    return str(value)
-
-
-def _validate_calculation(rule, row, column):
-    calculation = str((rule or {}).get("calculation_rule") or "").strip()
-    if not calculation:
-        return None
-    flag_match = re.search(
-        r"(?:flag\s+)?true\s+when\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*['\"]?([^'\"]+)['\"]?",
-        calculation,
-        re.IGNORECASE,
-    )
-    if flag_match and ("bool" in column.data_type.lower() or column.name.lower().endswith("flag") or column.name.lower().startswith("is_")):
-        source_name, expected = flag_match.groups()
-        return row.get(column.name) == (str(row.get(source_name, "")).strip().lower() == expected.strip().lower())
-    if "=" not in calculation:
-        return None
-    target, expression = [part.strip() for part in calculation.split("=", 1)]
-    if target.lower() != column.name.lower():
-        return None
-    percentage_match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*/\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\*\s*100", expression, re.IGNORECASE)
-    if percentage_match:
-        numerator = _decimal(row.get(percentage_match.group(1)))
-        denominator = _decimal(row.get(percentage_match.group(2)))
-        actual = _decimal(row.get(column.name))
-        if numerator is None or denominator in (None, Decimal("0")) or actual is None:
-            return False
-        expected = (numerator / denominator) * Decimal("100")
-        return actual == expected.quantize(actual) if actual.as_tuple().exponent < 0 else actual == expected
-    delay_match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*-\s*([a-zA-Z_][a-zA-Z0-9_]*)", expression)
-    if delay_match and "minute" in column.name.lower():
-        left = row.get(delay_match.group(1))
-        right = row.get(delay_match.group(2))
-        if isinstance(left, datetime) and isinstance(right, datetime):
-            return row.get(column.name) == int((left - right).total_seconds() // 60)
-    match = re.fullmatch(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*([*+\-/])\s*([a-zA-Z_][a-zA-Z0-9_]*)", expression)
-    if not match:
-        return None
-    left_name, operator, right_name = match.groups()
-    left = _decimal(row.get(left_name))
-    right = _decimal(row.get(right_name))
-    actual = _decimal(row.get(column.name))
-    if left is None or right is None or actual is None:
-        return False
-    if operator == "*":
-        expected = left * right
-    elif operator == "+":
-        expected = left + right
-    elif operator == "-":
-        expected = left - right
-    elif operator == "/" and right != 0:
-        expected = left / right
-    else:
-        return None
-    return actual == expected.quantize(actual) if actual.as_tuple().exponent < 0 else actual == expected
 
 
 def _is_analytical_model(model):
@@ -166,14 +74,10 @@ def _is_json_serializable(value):
     except (TypeError, ValueError):
         return False
 
-def validate_generated_data(model, data, expected_rows, value_catalog=None):
+def validate_generated_data(model, data, expected_rows):
     errors = []
-    catalog_compliance_errors = []
     data_type_errors = []
-    calculation_errors = []
     constraint_errors = []
-    date_rule_errors = []
-    boolean_rule_errors = []
     placeholder_warnings = []
     table_map = model.table_map()
     parsed_fks = [_fk_label(fk) for table in model.tables for fk in table.foreign_keys]
@@ -181,24 +85,12 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
     skipped_fk_like_columns = _fk_like_columns(model)
     length_checks = []
     numeric_checks = []
-    catalog_rules_checked = 0
-    catalog_warnings = list((value_catalog or {}).get("warnings", []))
-    catalog_errors = list((value_catalog or {}).get("errors", []))
-    if catalog_errors:
-        catalog_warnings.extend([f"Catalog parser error ignored for DDL-first generation: {error}" for error in catalog_errors])
-    if (value_catalog or {}).get("markers_present") and (value_catalog or {}).get("rule_count", 0) == 0:
-        catalog_warnings.append("Synthetic value catalog markers were present but no usable table_column_rules were found; used DDL-first semantic inference.")
-    if _is_analytical_model(model) and not (value_catalog or {}).get("catalog_found"):
-        catalog_warnings.append("Analytical DDL contains dim_/fact_ tables but no valid Synthetic Data Value Catalog was found; used DDL-first semantic inference.")
 
     for table in model.tables:
         rows = data.get(table.name, [])
         if len(rows) != expected_rows:
             errors.append(f"{table.name}: expected {expected_rows} rows, found {len(rows)}.")
         for column in table.columns:
-            rule = get_catalog_rule(value_catalog, table.name, column.name)
-            if rule:
-                catalog_rules_checked += 1
             if column.max_length:
                 length_checks.append(f"{table.name}.{column.name} <= {column.max_length}")
             if column.numeric_precision is not None and column.numeric_scale is not None:
@@ -239,25 +131,7 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
                     if abs(decimal_value) >= max_abs_value or value_scale > column.numeric_scale:
                         errors.append(f"{table.name}.{column.name}: value exceeds numeric({column.numeric_precision},{column.numeric_scale}) precision/scale in row {idx}.")
 
-                if rule:
-                    allowed = [_normalize_rule_value(item, column) for item in (rule.get("allowed_values") or [])]
-                    if allowed and value not in allowed and value not in (None, ""):
-                        catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx} value {value!r} is not in optional allowed_values hint {allowed!r}.")
-                    numeric_min = rule.get("numeric_min")
-                    numeric_max = rule.get("numeric_max")
-                    if numeric_min is not None or numeric_max is not None:
-                        decimal_value = _decimal(value)
-                        if decimal_value is not None:
-                            if numeric_min is not None and decimal_value < Decimal(str(numeric_min)):
-                                catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx} value {value!r} is below optional numeric_min hint {numeric_min}.")
-                            if numeric_max is not None and decimal_value > Decimal(str(numeric_max)):
-                                catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx} value {value!r} is above optional numeric_max hint {numeric_max}.")
-                    calculation_ok = _validate_calculation(rule, row, column)
-                    if calculation_ok is False:
-                        calculation_errors.append(f"{table.name}.{column.name} row {idx}: optional calculation_rule {rule.get('calculation_rule')!r} is not satisfied.")
-                    if _is_placeholder(value):
-                        catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx}: placeholder-like value {value!r} generated despite optional catalog hint.")
-                elif _is_placeholder(value):
+                if _is_placeholder(value):
                     placeholder_warnings.append(f"{table.name}.{column.name} row {idx}: placeholder-like fallback value {value!r}.")
 
         if table.primary_key:
@@ -294,11 +168,7 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
                     break
     errors.extend(data_type_errors)
     errors.extend(constraint_errors)
-    errors.extend(date_rule_errors)
-    errors.extend(boolean_rule_errors)
-    catalog_warnings.extend(catalog_compliance_errors)
-    catalog_warnings.extend(calculation_errors)
-    status = "failed" if errors else ("passed_with_warnings" if skipped_fk_like_columns or placeholder_warnings or catalog_warnings else "passed")
+    status = "failed" if errors else ("passed_with_warnings" if skipped_fk_like_columns or placeholder_warnings else "passed")
     return {
         "status": status,
         "errors": errors,
@@ -307,15 +177,8 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
         "skipped_fk_like_columns": skipped_fk_like_columns,
         "length_checks": length_checks,
         "numeric_checks": numeric_checks,
-        "catalog_rules_checked": catalog_rules_checked,
-        "catalog_compliance_errors": catalog_compliance_errors,
         "data_type_errors": data_type_errors,
-        "calculation_errors": calculation_errors,
         "constraint_errors": constraint_errors,
-        "date_rule_errors": date_rule_errors,
-        "boolean_rule_errors": boolean_rule_errors,
         "placeholder_warnings": placeholder_warnings,
-        "catalog_parser_warnings": catalog_warnings,
-        "catalog_parser_errors": catalog_errors,
         "row_count_summary": {table.name: len(data.get(table.name, [])) for table in model.tables},
     }
