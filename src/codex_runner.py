@@ -140,3 +140,6 @@ class MockCodexClient:
             ],
         }
         return json.dumps(response, indent=2)
+
+    def run_catalog_repair(self, prompt_text):
+        return self.run_generation(prompt_text)
