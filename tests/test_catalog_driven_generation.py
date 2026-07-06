@@ -151,3 +151,104 @@ CREATE TABLE fact_metrics (
         assert row["delay_minutes"] == 30
         assert row["success_flag"] is True
     assert validate_generated_data(model, data, 2, value_catalog=catalog)["status"] == "passed"
+
+
+def test_catalog_date_key_pattern_yyyymmdd_generates_integer_without_crash():
+    model = parse_ddl("CREATE TABLE date_values (id integer PRIMARY KEY, date_key integer);")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 1,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "date_values", "column_name": "date_key", "value_pattern": "YYYYMMDD"},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=2, seed=1, value_catalog=catalog)
+    assert isinstance(data["date_values"][0]["date_key"], int)
+    assert data["date_values"][0]["date_key"] == 20260706
+
+
+def test_catalog_braced_yyyymmdd_pattern_generates_integer_date_key():
+    model = parse_ddl("CREATE TABLE fact_sales (sales_key integer PRIMARY KEY, order_date_key integer);")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 1,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "fact_sales", "column_name": "order_date_key", "value_pattern": "{YYYYMMDD}"},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=1, seed=1, value_catalog=catalog)
+    assert data["fact_sales"][0]["order_date_key"] == 20260706
+
+
+def test_zero_padded_sequence_patterns_render_generically():
+    model = parse_ddl("""
+CREATE TABLE generated_ids (
+  id integer PRIMARY KEY,
+  customer_id varchar(20),
+  store_id varchar(20),
+  order_id varchar(40),
+  line_number integer
+);
+""")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 4,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "generated_ids", "column_name": "customer_id", "value_pattern": "CUST-{000001}"},
+            {"table_name": "generated_ids", "column_name": "store_id", "value_pattern": "STORE-{0001}"},
+            {"table_name": "generated_ids", "column_name": "order_id", "value_pattern": "ORD-{YYYYMMDD}-{000001}"},
+            {"table_name": "generated_ids", "column_name": "line_number", "value_pattern": "{line_number}"},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=1, seed=1, value_catalog=catalog)
+    row = data["generated_ids"][0]
+    assert row["customer_id"] == "CUST-000001"
+    assert row["store_id"] == "STORE-0001"
+    assert row["order_id"] == "ORD-20260706-000001"
+    assert row["line_number"] == 1
+
+
+def test_invalid_decimal_pattern_falls_back_without_crashing():
+    model = parse_ddl("CREATE TABLE bad_pattern (id integer PRIMARY KEY, amount numeric(6,2));")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 1,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "bad_pattern", "column_name": "amount", "value_pattern": "not-a-number"},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=1, seed=1, value_catalog=catalog)
+    assert data["bad_pattern"][0]["amount"] == Decimal("0.00")
+    assert data["__stats__"]["type_normalization_warnings"]
+
+
+def test_fact_date_key_uses_existing_dim_date_values_when_possible():
+    model = parse_ddl("""
+CREATE TABLE dim_date (date_key integer PRIMARY KEY, full_date date);
+CREATE TABLE fact_sales (
+  sales_key integer PRIMARY KEY,
+  order_date_key integer
+);
+""")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 2,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "dim_date", "column_name": "date_key", "value_pattern": "YYYYMMDD"},
+            {"table_name": "fact_sales", "column_name": "order_date_key", "relationship_rule": "choose existing dim_date.date_key"},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=3, seed=1, value_catalog=catalog)
+    dim_keys = {row["date_key"] for row in data["dim_date"]}
+    assert dim_keys == {20260706, 20260707, 20260708}
+    assert {row["order_date_key"] for row in data["fact_sales"]} <= dim_keys

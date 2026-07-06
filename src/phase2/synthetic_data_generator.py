@@ -51,6 +51,7 @@ GENERIC_STATUSES = ["New", "Active", "Pending", "Completed", "Inactive"]
 GENERIC_SEGMENTS = ["New", "Regular", "Premium"]
 GENERIC_METHODS = ["Online", "In Person", "Phone", "Partner"]
 GENERIC_TYPES = ["Standard", "Preferred", "Specialty"]
+SYNTHETIC_BASE_DATE = date(2026, 7, 6)
 
 
 def table_generation_order(model):
@@ -95,6 +96,8 @@ def _pk_value(column, index, table_name, stats):
     if "uuid" in dtype:
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{table_name}.{column.name}.{index}"))
     if any(token in dtype for token in ["int", "serial"]):
+        if column.name.lower() == "date_key" or column.name.lower().endswith("_date_key"):
+            return _date_key_value(index)
         return index
     return _bounded(f"{table_name}_{index:03d}", column, stats)
 
@@ -131,19 +134,72 @@ def _short_email(index, column, stats, first_name="user", last_name="example"):
         value = f"u{index}@x.co"
     return _bounded(value, column, stats)
 
+def _is_integer_type(column):
+    dtype = column.data_type.lower()
+    return any(token in dtype for token in ["int", "serial"])
+
+
+def _is_numeric_type(column):
+    dtype = column.data_type.lower()
+    return any(token in dtype for token in ["numeric", "decimal", "double", "float"])
+
+
+def _is_date_key_column(column):
+    name = column.name.lower()
+    return name == "date_key" or name.endswith("_date_key")
+
+
+def _date_key_value(index=1):
+    synthetic_date = SYNTHETIC_BASE_DATE + timedelta(days=(index - 1) % 365)
+    return int(synthetic_date.strftime("%Y%m%d"))
+
+
+def _record_type_fallback(stats, column, value, reason):
+    if stats is not None:
+        stats.setdefault("type_normalization_warnings", []).append(
+            f"{column.name}: could not normalize value {value!r}; used type-compatible fallback. Reason: {reason}"
+        )
+
+
+def _type_compatible_fallback(column, stats=None, value=None, reason="conversion failed"):
+    dtype = column.data_type.lower()
+    _record_type_fallback(stats, column, value, reason)
+    if _is_integer_type(column):
+        return _date_key_value() if _is_date_key_column(column) else 1
+    if _is_numeric_type(column):
+        scale = column.numeric_scale if column.numeric_scale is not None else 2
+        quantizer = Decimal(1).scaleb(-scale) if scale > 0 else Decimal(1)
+        return Decimal("0").quantize(quantizer)
+    if "bool" in dtype:
+        return False
+    if dtype.startswith("date"):
+        return SYNTHETIC_BASE_DATE
+    if "timestamp" in dtype:
+        return datetime.combine(SYNTHETIC_BASE_DATE, datetime.min.time())
+    if "uuid" in dtype:
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{column.name}.{value}"))
+    return _bounded(str(value or ""), column, stats or {"truncated_values": 0})
 
 
 def normalize_value_for_column(value, column, stats=None):
     dtype = column.data_type.lower()
     if value is None:
         return None
-    if any(token in dtype for token in ["int", "serial"]):
-        return int(Decimal(str(value)))
-    if any(token in dtype for token in ["numeric", "decimal", "double", "float"]):
-        decimal_value = Decimal(str(value))
-        if column.numeric_scale is not None:
-            decimal_value = decimal_value.quantize(Decimal(1).scaleb(-column.numeric_scale) if column.numeric_scale else Decimal(1))
-        return decimal_value
+    if _is_integer_type(column):
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return int(value.strftime("%Y%m%d")) if _is_date_key_column(column) else 1
+        try:
+            return int(Decimal(str(value)))
+        except (InvalidOperation, TypeError, ValueError):
+            return _type_compatible_fallback(column, stats, value, "integer conversion failed")
+    if _is_numeric_type(column):
+        try:
+            decimal_value = Decimal(str(value))
+            if column.numeric_scale is not None:
+                decimal_value = decimal_value.quantize(Decimal(1).scaleb(-column.numeric_scale) if column.numeric_scale else Decimal(1))
+            return decimal_value
+        except (InvalidOperation, TypeError, ValueError):
+            return _type_compatible_fallback(column, stats, value, "decimal conversion failed")
     if "bool" in dtype:
         if isinstance(value, bool):
             return value
@@ -156,11 +212,17 @@ def normalize_value_for_column(value, column, stats=None):
     if dtype.startswith("date"):
         if isinstance(value, date) and not isinstance(value, datetime):
             return value
-        return datetime.fromisoformat(str(value)).date()
+        try:
+            return datetime.fromisoformat(str(value)).date()
+        except (TypeError, ValueError):
+            return _type_compatible_fallback(column, stats, value, "date conversion failed")
     if "timestamp" in dtype:
         if isinstance(value, datetime):
             return value
-        return datetime.fromisoformat(str(value))
+        try:
+            return datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return _type_compatible_fallback(column, stats, value, "timestamp conversion failed")
     if "uuid" in dtype:
         try:
             return str(uuid.UUID(str(value)))
@@ -168,20 +230,27 @@ def normalize_value_for_column(value, column, stats=None):
             return str(uuid.uuid5(uuid.NAMESPACE_DNS, str(value)))
     return _bounded(str(value), column, stats or {"truncated_values": 0})
 
-def _render_pattern(pattern, fake, table, column, index, stats, catalog):
+def _render_pattern(pattern, fake, table, column, index, stats, catalog, row=None):
     context = (catalog or {}).get("business_context", {}) if isinstance(catalog, dict) else {}
+    date_text = (SYNTHETIC_BASE_DATE + timedelta(days=(index - 1) % 365)).strftime("%Y%m%d")
     replacements = {
         "business_name": context.get("business_name", "Business"),
         "table_name": table.name,
         "column_name": column.name,
         "number": f"{index:03d}",
         "row_number": f"{index:03d}",
+        "line_number": str(((index - 1) % 5) + 1),
+        "YYYYMMDD": date_text,
         "first_name": fake.first_name(),
         "last_name": fake.last_name(),
         "city": fake.city(),
         "category": "Category",
+        "order_id": (row or {}).get("order_id", f"ORD-{date_text}-{index:06d}"),
     }
     value = pattern
+    if value == "YYYYMMDD":
+        value = date_text
+    value = re.sub(r"\{0[0-9]*\}", lambda match: f"{index:0{len(match.group(0)) - 2}d}", value)
     for key, replacement in replacements.items():
         value = value.replace("{" + key + "}", str(replacement))
     return normalize_value_for_column(value, column, stats)
@@ -248,7 +317,7 @@ def _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row=No
         return normalize_value_for_column(_cycle(examples, index, column, stats), column, stats)
     pattern = rule.get("value_pattern")
     if pattern:
-        return _render_pattern(str(pattern), fake, table, column, index, stats, catalog)
+        return _render_pattern(str(pattern), fake, table, column, index, stats, catalog, row)
     if rule.get("numeric_min") is not None or rule.get("numeric_max") is not None:
         if any(token in column.data_type.lower() for token in ["int", "serial"]):
             min_value = int(rule.get("numeric_min") if rule.get("numeric_min") is not None else 1)
@@ -260,6 +329,45 @@ def _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row=No
     if rule.get("date_rule"):
         return normalize_value_for_column(_date_from_rule(rule.get("date_rule"), row or {}, index, rng, stats), column, stats)
     return None
+
+
+def _relationship_parent_for_column(column, rule, generated):
+    relationship = str((rule or {}).get("relationship_rule") or "").lower()
+    column_name = column.name.lower()
+    explicit = re.search(r"(dim_[a-zA-Z0-9_]+)\.([a-zA-Z_][a-zA-Z0-9_]*)", relationship)
+    if explicit:
+        table_name, parent_column = explicit.groups()
+        for generated_table in generated:
+            if generated_table.lower() == table_name.lower():
+                return generated_table, parent_column
+    if _is_date_key_column(column):
+        for generated_table in generated:
+            if generated_table.lower().endswith("dim_date"):
+                return generated_table, "date_key"
+    if column_name.endswith("_key"):
+        base = column_name[:-4]
+        expected = f"dim_{base}"
+        for generated_table in generated:
+            if generated_table.lower().endswith(expected):
+                return generated_table, column.name
+    return None, None
+
+
+def _apply_catalog_relationships(table, row, index, generated, value_catalog, stats):
+    for column in table.columns:
+        rule = get_catalog_rule(value_catalog, table.name, column.name)
+        if not rule and not _is_date_key_column(column):
+            continue
+        parent_table, parent_column = _relationship_parent_for_column(column, rule, generated)
+        if not parent_table or parent_table not in generated:
+            continue
+        parent_rows = generated[parent_table]
+        if not parent_rows:
+            continue
+        parent_row = parent_rows[(index - 1) % len(parent_rows)]
+        if parent_column in parent_row:
+            row[column.name] = normalize_value_for_column(parent_row[parent_column], column, stats)
+            stats.setdefault("relationship_rule_columns", set()).add(f"{table.name}.{column.name}")
 
 
 def _generic_label(prefix, index):
@@ -282,6 +390,8 @@ def _fallback_value(fake, rng, table, column, index, stats):
         return _bounded(fake.city(), column, stats)
     if "country" in name:
         return _bounded(fake.country(), column, stats)
+    if _is_date_key_column(column) and _is_integer_type(column):
+        return _date_key_value(index)
     if any(token in name for token in ["customer_name", "employee_name", "patient_name", "person_name", "contact_name"]):
         return _bounded(fake.name(), column, stats)
     if "first_name" in name:
@@ -423,9 +533,11 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
         "catalog_errors": list((value_catalog or {}).get("errors", [])),
         "generic_fallback_values": 0,
         "calculated_columns": set(),
+        "relationship_rule_columns": set(),
         "calculation_warnings": [],
         "date_rule_warnings": [],
         "boolean_rule_warnings": [],
+        "type_normalization_warnings": [],
         "business_name": ((catalog or {}).get("business_context", {}) if isinstance(catalog, dict) else {}).get("business_name", ""),
     }
 
@@ -451,11 +563,13 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
                 parent_row = parent_rows[(index - 1) % len(parent_rows)]
                 for child_col, parent_col in zip(fk.child_columns, fk.parent_columns):
                     row[child_col] = parent_row[parent_col]
+            _apply_catalog_relationships(table, row, index, generated, value_catalog, stats)
             rows.append(row)
         generated[table.name] = rows
     _finalize_calculations(model, generated, value_catalog, stats)
     stats["catalog_columns_used"] = sorted(stats["catalog_columns_used"])
     stats["fallback_columns_used"] = sorted(stats["fallback_columns_used"])
     stats["calculated_columns"] = sorted(stats["calculated_columns"])
+    stats["relationship_rule_columns"] = sorted(stats["relationship_rule_columns"])
     generated["__stats__"] = stats
     return generated
