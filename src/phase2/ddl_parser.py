@@ -15,7 +15,7 @@ class DDLParserError(Exception):
 CREATE_SCHEMA_RE = re.compile(r"CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w\".]+)", re.IGNORECASE)
 CREATE_TABLE_RE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w\".]+)\s*\((.*)\)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
 SUPPORTED_TYPE_RE = re.compile(
-    r"^(smallint|integer|int|bigint|serial|bigserial|uuid|varchar|character\s+varying|text|date|timestamp(?:\s+with(?:out)?\s+time\s+zone)?|boolean|bool|numeric|decimal|float|double\s+precision)(?:\s*\([^)]*\))?",
+    r"^(character\s+varying|varchar|character|char|text|smallserial|smallint|integer|int|bigserial|bigint|serial|uuid|jsonb|json|date|time|timestamptz|timestamp(?:\s+with(?:out)?\s+time\s+zone)?|boolean|bool|numeric|decimal|double\s+precision|real|float)(?:\s*\([^)]*\))?(?=\s|,|$)",
     re.IGNORECASE,
 )
 
@@ -130,15 +130,15 @@ def _parse_column(part, table):
     rest = match.group(2).strip()
     type_match = SUPPORTED_TYPE_RE.match(rest)
     if not type_match:
-        raise DDLParserError(f"Unsupported data type for column {name}: {rest}")
+        raise DDLParserError(f"Unsupported data type in table {table.full_name}, column {name}: {rest}")
     data_type = type_match.group(0).strip()
     constraints = rest[type_match.end():]
-    length_match = re.match(r"^(?:varchar|character\s+varying)\s*\((\d+)\)", data_type, re.IGNORECASE)
+    length_match = re.match(r"^(?:varchar|character\s+varying|char|character)\s*\((\d+)\)", data_type, re.IGNORECASE)
     max_length = int(length_match.group(1)) if length_match else None
     numeric_match = re.match(r"^(?:numeric|decimal)\s*\((\d+)\s*,\s*(\d+)\)", data_type, re.IGNORECASE)
     numeric_precision = int(numeric_match.group(1)) if numeric_match else None
     numeric_scale = int(numeric_match.group(2)) if numeric_match else None
-    default_match = re.search(r"\bDEFAULT\s+(.+?)(?=\s+NOT\s+NULL|\s+PRIMARY\s+KEY|\s+REFERENCES\b|\s+CHECK\b|$)", constraints, re.IGNORECASE | re.DOTALL)
+    default_match = re.search(r"\bDEFAULT\s+(.+?)(?=\s+NULL\b|\s+NOT\s+NULL|\s+PRIMARY\s+KEY|\s+UNIQUE\b|\s+REFERENCES\b|\s+CHECK\b|\s+COLLATE\b|\s+GENERATED\b|\s+IDENTITY\b|$)", constraints, re.IGNORECASE | re.DOTALL)
     column = Column(
         name=name,
         data_type=data_type,

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import date, datetime, time
 from phase2.ddl_parser import parse_ddl
 from phase2.synthetic_data_generator import generate_synthetic_data
 from phase2.validator import validate_generated_data
@@ -226,3 +227,72 @@ CREATE TABLE dim_location (
     assert len(tuples) == 100
     assert {row["country"] for row in data["dim_location"]} == {"India"}
     assert validate_generated_data(model, data, 100, value_catalog=catalog)["status"] in {"passed", "passed_with_warnings"}
+
+
+def test_generation_supports_common_postgres_types_and_json():
+    model = parse_ddl("""
+CREATE TABLE type_generation (
+  id integer PRIMARY KEY,
+  text_value TEXT,
+  varchar_value VARCHAR(40),
+  integer_value INTEGER,
+  bigint_value BIGINT,
+  amount NUMERIC(12,2),
+  bool_value BOOLEAN,
+  date_value DATE,
+  time_value TIME,
+  timestamp_value TIMESTAMP,
+  timestamptz_value TIMESTAMPTZ,
+  uuid_value UUID,
+  json_value JSON,
+  jsonb_value JSONB
+);
+""")
+    data = generate_synthetic_data(model, rows_per_table=3, seed=1)
+    row = data["type_generation"][0]
+    assert isinstance(row["integer_value"], int)
+    assert isinstance(row["bigint_value"], int)
+    assert isinstance(row["amount"], Decimal)
+    assert isinstance(row["bool_value"], bool)
+    assert isinstance(row["date_value"], date)
+    assert isinstance(row["time_value"], time)
+    assert isinstance(row["timestamp_value"], datetime)
+    assert isinstance(row["timestamptz_value"], datetime)
+    assert isinstance(row["json_value"], dict)
+    assert isinstance(row["jsonb_value"], dict)
+    assert validate_generated_data(model, data, 3)["status"] in {"passed", "passed_with_warnings"}
+
+
+def test_primary_key_uniqueness_for_multiple_pk_shapes():
+    model = parse_ddl("""
+CREATE TABLE pk_shapes (
+  int_id integer,
+  business_id varchar(30),
+  uuid_id uuid,
+  part_code varchar(30),
+  line_number integer,
+  PRIMARY KEY (int_id, business_id, uuid_id, part_code, line_number)
+);
+""")
+    data = generate_synthetic_data(model, rows_per_table=100, seed=1)
+    keys = {
+        (row["int_id"], row["business_id"], row["uuid_id"], row["part_code"], row["line_number"])
+        for row in data["pk_shapes"]
+    }
+    assert len(keys) == 100
+
+
+def test_unique_check_in_capacity_failure_is_clear():
+    model = parse_ddl("""
+CREATE TABLE impossible_unique (
+  id integer PRIMARY KEY,
+  status varchar(5) UNIQUE,
+  CHECK (status IN ('A','B'))
+);
+""")
+    try:
+        generate_synthetic_data(model, rows_per_table=100, seed=1)
+    except Exception as exc:
+        assert "DDL constraint capacity exceeded" in str(exc)
+    else:
+        raise AssertionError("Expected capacity failure for impossible UNIQUE/CHECK combination")

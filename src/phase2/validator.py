@@ -1,5 +1,6 @@
-from datetime import date, datetime
+from datetime import date, datetime, time as dt_time
 from decimal import Decimal, InvalidOperation
+import json
 import re
 
 from .value_catalog_parser import get_catalog_rule
@@ -42,7 +43,7 @@ def _normalize_rule_value(value, column):
     try:
         if any(token in dtype for token in ["int", "serial"]):
             return int(Decimal(str(value)))
-        if any(token in dtype for token in ["numeric", "decimal", "double", "float"]):
+        if any(token in dtype for token in ["numeric", "decimal", "double", "float", "real"]):
             decimal_value = Decimal(str(value))
             if column.numeric_scale is not None:
                 decimal_value = decimal_value.quantize(Decimal(1).scaleb(-column.numeric_scale) if column.numeric_scale else Decimal(1))
@@ -59,7 +60,11 @@ def _normalize_rule_value(value, column):
             if isinstance(value, date) and not isinstance(value, datetime):
                 return value
             return datetime.fromisoformat(str(value)).date()
-        if "timestamp" in dtype:
+        if dtype.startswith("time") and "timestamp" not in dtype:
+            if isinstance(value, dt_time):
+                return value
+            return dt_time.fromisoformat(str(value))
+        if "timestamp" in dtype or "timestamptz" in dtype:
             if isinstance(value, datetime):
                 return value
             return datetime.fromisoformat(str(value))
@@ -147,6 +152,20 @@ def _validate_check_value(check, value):
         return decimal_value <= threshold
     return True
 
+
+def _is_json_serializable(value):
+    if isinstance(value, str):
+        try:
+            json.loads(value)
+            return True
+        except ValueError:
+            return True
+    try:
+        json.dumps(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
 def validate_generated_data(model, data, expected_rows, value_catalog=None):
     errors = []
     catalog_compliance_errors = []
@@ -194,7 +213,7 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
                 dtype = column.data_type.lower()
                 if any(token in dtype for token in ["int", "serial"]) and value not in (None, "") and not isinstance(value, int):
                     data_type_errors.append(f"{table.name}.{column.name} row {idx}: expected integer, got {value!r}.")
-                if any(token in dtype for token in ["numeric", "decimal", "double", "float"]):
+                if any(token in dtype for token in ["numeric", "decimal", "double", "float", "real"]):
                     decimal_value = _decimal(value)
                     if value not in (None, "") and decimal_value is None:
                         data_type_errors.append(f"{table.name}.{column.name} row {idx}: expected numeric, got {value!r}.")
@@ -202,8 +221,12 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
                     data_type_errors.append(f"{table.name}.{column.name} row {idx}: expected boolean, got {value!r}.")
                 if dtype.startswith("date") and value not in (None, "") and not isinstance(value, date):
                     data_type_errors.append(f"{table.name}.{column.name} row {idx}: expected date, got {value!r}.")
-                if "timestamp" in dtype and value not in (None, "") and not isinstance(value, (date, datetime)):
+                if dtype.startswith("time") and "timestamp" not in dtype and value not in (None, "") and not isinstance(value, dt_time):
+                    data_type_errors.append(f"{table.name}.{column.name} row {idx}: expected time, got {value!r}.")
+                if ("timestamp" in dtype or "timestamptz" in dtype) and value not in (None, "") and not isinstance(value, (date, datetime)):
                     data_type_errors.append(f"{table.name}.{column.name} row {idx}: expected timestamp, got {value!r}.")
+                if dtype in {"json", "jsonb"} and value not in (None, "") and not _is_json_serializable(value):
+                    data_type_errors.append(f"{table.name}.{column.name} row {idx}: expected JSON-serializable value, got {value!r}.")
 
                 if column.numeric_precision is not None and column.numeric_scale is not None and value not in (None, ""):
                     decimal_value = _decimal(value)

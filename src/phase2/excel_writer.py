@@ -1,5 +1,6 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
+import json
 from pathlib import Path
 import re
 
@@ -24,7 +25,9 @@ def _safe_sheet_name(name, used):
 def _excel_value(value):
     if isinstance(value, Decimal):
         return float(value)
-    if isinstance(value, (date, datetime)):
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True)
+    if isinstance(value, (date, datetime, time)):
         return value
     return value
 

@@ -165,3 +165,35 @@ CREATE TABLE unsupported_check_test (
     assert table.check_constraints[0].supported is False
     assert table.ignored_constraints
     assert model.warnings
+
+
+def test_parse_postgres_types_without_constraint_text_in_data_type():
+    model = parse_ddl("""
+CREATE TABLE postgres_type_test (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  payload JSONB NOT NULL,
+  raw_payload JSON DEFAULT '{}' NOT NULL,
+  event_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  display_name VARCHAR(50) NOT NULL,
+  amount NUMERIC(12,2) CHECK (amount >= 0),
+  short_code CHAR(5) COLLATE "C",
+  sequence_no BIGSERIAL,
+  score DOUBLE PRECISION,
+  ratio REAL,
+  event_clock TIME
+);
+""")
+    columns = {column.name: column for column in model.tables[0].columns}
+    assert columns["payload"].data_type.upper() == "JSONB"
+    assert columns["payload"].nullable is False
+    assert columns["raw_payload"].data_type.upper() == "JSON"
+    assert columns["raw_payload"].default == "'{}'"
+    assert columns["event_time"].data_type.upper() == "TIMESTAMPTZ"
+    assert columns["event_time"].nullable is False
+    assert columns["display_name"].data_type.upper() == "VARCHAR(50)"
+    assert columns["display_name"].max_length == 50
+    assert columns["amount"].data_type.upper() == "NUMERIC(12,2)"
+    assert columns["amount"].numeric_precision == 12
+    assert columns["amount"].numeric_scale == 2
+    assert "NOT NULL" not in columns["payload"].data_type.upper()
+    assert "DEFAULT" not in columns["event_time"].data_type.upper()

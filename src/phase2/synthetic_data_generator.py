@@ -1,5 +1,5 @@
 from collections import defaultdict, deque
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time as dt_time, timedelta
 from decimal import Decimal, InvalidOperation
 import random
 import re
@@ -121,6 +121,12 @@ def _business_id_value(column, index):
     return f"{prefix}-{index:06d}"
 
 
+def _table_prefix(table_name):
+    cleaned = re.sub(r"^(dim_|fact_|stg_|load_)", "", table_name.lower()).replace("_raw", "")
+    letters = re.sub(r"[^a-z0-9]", "", cleaned).upper()
+    return (letters[:12] or "ROW")
+
+
 def _catalog_warning(stats, category, message):
     stats.setdefault(category, []).append(message)
     stats.setdefault("catalog_rule_warnings", []).append(message)
@@ -136,6 +142,8 @@ def _pk_value(column, index, table_name, stats):
         return index
     if column.name.lower().endswith("_id") and any(token in dtype for token in ["char", "text"]):
         return _bounded(_business_id_value(column, index), column, stats)
+    if any(token in dtype for token in ["char", "text"]):
+        return _bounded(f"{_table_prefix(table_name)}-{index:06d}", column, stats)
     return _bounded(f"{table_name}_{index:03d}", column, stats)
 
 
@@ -178,12 +186,16 @@ def _is_integer_type(column):
 
 def _is_numeric_type(column):
     dtype = column.data_type.lower()
-    return any(token in dtype for token in ["numeric", "decimal", "double", "float"])
+    return any(token in dtype for token in ["numeric", "decimal", "double", "float", "real"])
 
 
 def _is_date_key_column(column):
     name = column.name.lower()
     return name == "date_key" or name.endswith("_date_key")
+
+
+def _is_json_type(column):
+    return column.data_type.lower() in {"json", "jsonb"}
 
 
 def _date_key_value(index=1):
@@ -211,10 +223,14 @@ def _type_compatible_fallback(column, stats=None, value=None, reason="conversion
         return False
     if dtype.startswith("date"):
         return SYNTHETIC_BASE_DATE
-    if "timestamp" in dtype:
+    if dtype.startswith("time") and "timestamp" not in dtype:
+        return dt_time(12, 0, 0)
+    if "timestamp" in dtype or "timestamptz" in dtype:
         return datetime.combine(SYNTHETIC_BASE_DATE, datetime.min.time())
     if "uuid" in dtype:
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{column.name}.{value}"))
+    if _is_json_type(column):
+        return {"generated": True, "row_number": 1, "source": "synthetic"}
     return _bounded(str(value or ""), column, stats or {"truncated_values": 0})
 
 
@@ -272,7 +288,14 @@ def normalize_value_for_column(value, column, stats=None):
             return datetime.fromisoformat(str(value)).date()
         except (TypeError, ValueError):
             return _type_compatible_fallback(column, stats, value, "date conversion failed")
-    if "timestamp" in dtype:
+    if dtype.startswith("time") and "timestamp" not in dtype:
+        if isinstance(value, dt_time):
+            return value
+        try:
+            return dt_time.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return _type_compatible_fallback(column, stats, value, "time conversion failed")
+    if "timestamp" in dtype or "timestamptz" in dtype:
         if isinstance(value, datetime):
             return value
         try:
@@ -284,6 +307,14 @@ def normalize_value_for_column(value, column, stats=None):
             return str(uuid.UUID(str(value)))
         except (ValueError, TypeError):
             return str(uuid.uuid5(uuid.NAMESPACE_DNS, str(value)))
+    if _is_json_type(column):
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            import json
+            return json.loads(str(value))
+        except (TypeError, ValueError):
+            return {"generated": True, "row_number": 1, "source": "synthetic", "value": str(value)}
     return _bounded(str(value), column, stats or {"truncated_values": 0})
 
 def _render_pattern(pattern, fake, table, column, index, stats, catalog, row=None):
@@ -455,7 +486,9 @@ def _unique_adjusted_value(value, column, index, stats):
         return normalize_value_for_column(index, column, stats)
     if dtype.startswith("date"):
         return SYNTHETIC_BASE_DATE + timedelta(days=index % 365)
-    if "timestamp" in dtype:
+    if dtype.startswith("time") and "timestamp" not in dtype:
+        return dt_time((index % 23), index % 59, 0)
+    if "timestamp" in dtype or "timestamptz" in dtype:
         return datetime.combine(SYNTHETIC_BASE_DATE + timedelta(days=index % 365), datetime.min.time())
     if "bool" in dtype:
         return bool(index % 2)
@@ -481,6 +514,50 @@ def _is_catalog_or_check_constrained(table, column_name, value_catalog):
         and check.values
         for check in getattr(table, "check_constraints", [])
     )
+
+
+def _check_in_values(table, column_name):
+    values = []
+    for check in getattr(table, "check_constraints", []):
+        if getattr(check, "supported", False) and check.column == column_name and check.operator == "IN":
+            values.extend(check.values)
+    return values
+
+
+def _detect_constraint_capacity(table, rows_per_table):
+    for unique in getattr(table, "unique_constraints", []):
+        if len(unique.columns) != 1:
+            continue
+        column_name = unique.columns[0]
+        values = _check_in_values(table, column_name)
+        if values and len(set(values)) < rows_per_table:
+            raise SyntheticDataError(
+                f"DDL constraint capacity exceeded: {table.name}.{column_name} UNIQUE has only {len(set(values))} possible values but {rows_per_table} rows requested."
+            )
+
+
+def _enforce_primary_key(table, row, seen_primary_keys, index, stats, retry=0):
+    if not table.primary_key:
+        return
+    key = tuple(row.get(col) for col in table.primary_key)
+    if key not in seen_primary_keys:
+        seen_primary_keys.add(key)
+        return
+    column_lookup = {column.name: column for column in table.columns}
+    adjusted_index = index + retry + 1
+    for column_name in table.primary_key:
+        column = column_lookup.get(column_name)
+        if column is None:
+            continue
+        row[column_name] = _pk_value(column, adjusted_index, table.name, stats)
+    key = tuple(row.get(col) for col in table.primary_key)
+    if key in seen_primary_keys and retry < 10:
+        _enforce_primary_key(table, row, seen_primary_keys, adjusted_index, stats, retry + 1)
+        return
+    if key in seen_primary_keys:
+        raise SyntheticDataError(f"Unable to generate unique primary key for {table.name} after retries.")
+    stats.setdefault("primary_key_repairs", set()).add(table.name)
+    seen_primary_keys.add(key)
 
 
 def _try_rotate_fk_value(table, row, unique_columns, column_name, generated, seen, index):
@@ -568,6 +645,8 @@ def _fallback_value(fake, rng, table, column, index, stats):
         return _bounded(fake.city(), column, stats)
     if "country" in name:
         return _bounded(fake.country(), column, stats)
+    if _is_json_type(column):
+        return {"generated": True, "row_number": index, "source": "synthetic"}
     if _is_date_key_column(column) and _is_integer_type(column):
         return _date_key_value(index)
     if name.endswith("_id") and any(token in dtype for token in ["char", "text"]):
@@ -593,18 +672,20 @@ def _fallback_value(fake, rng, table, column, index, stats):
         return _bounded(f"{title} {GENERIC_TYPES[(index - 1) % len(GENERIC_TYPES)]}", column, stats)
     if "date" in dtype or name.endswith("date"):
         return date.today() - timedelta(days=rng.randint(0, 730))
-    if "timestamp" in dtype or "time" in name:
+    if dtype.startswith("time") and "timestamp" not in dtype:
+        return dt_time(index % 23, index % 59, 0)
+    if "timestamp" in dtype or "timestamptz" in dtype or "time" in name:
         return datetime.now().replace(microsecond=0) - timedelta(days=rng.randint(0, 730), seconds=rng.randint(0, 86400))
     if "bool" in dtype or name.startswith("is_") or name.endswith("flag"):
         return index % 2 == 0
-    if any(token in dtype for token in ["numeric", "decimal"]):
+    if any(token in dtype for token in ["int", "serial"]):
+        return rng.randint(1, 1000)
+    if _is_numeric_type(column):
         return _numeric_value(rng, column, stats)
     if any(word in name for word in ["amount", "price", "cost", "total", "rate", "score", "percentage", "ratio", "value"]):
         return _numeric_value(rng, column, stats, 0, 100 if any(word in name for word in ["rate", "percentage", "ratio", "score"]) else None)
     if any(word in name for word in ["quantity", "count", "number"]):
         return rng.randint(1, 25)
-    if any(token in dtype for token in ["int", "serial"]):
-        return rng.randint(1, 1000)
     if "uuid" in dtype:
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{table.name}.{column.name}.{index}"))
     if "code" in name:
@@ -717,6 +798,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
         "unique_adjustment_warnings": [],
         "fk_safe_unique_adjustments": set(),
         "composite_unique_adjustments": set(),
+        "primary_key_repairs": set(),
         "generic_fallback_values": 0,
         "calculated_columns": set(),
         "relationship_rule_columns": set(),
@@ -728,8 +810,10 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
     }
 
     for table in table_generation_order(model):
+        _detect_constraint_capacity(table, rows_per_table)
         rows = []
         seen_unique = defaultdict(set)
+        seen_primary_keys = set()
         for index in range(1, rows_per_table + 1):
             row = {}
             for column in table.columns:
@@ -759,6 +843,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
                     row[child_col] = parent_row[parent_col]
             _apply_catalog_relationships(table, row, index, generated, value_catalog, stats)
             _apply_lifecycle_order(row)
+            _enforce_primary_key(table, row, seen_primary_keys, index, stats)
             _enforce_unique_constraints(table, row, seen_unique, index, stats, generated, value_catalog)
             rows.append(row)
         generated[table.name] = rows
@@ -769,5 +854,6 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
     stats["relationship_rule_columns"] = sorted(stats["relationship_rule_columns"])
     stats["fk_safe_unique_adjustments"] = sorted(stats["fk_safe_unique_adjustments"])
     stats["composite_unique_adjustments"] = sorted(stats["composite_unique_adjustments"])
+    stats["primary_key_repairs"] = sorted(stats["primary_key_repairs"])
     generated["__stats__"] = stats
     return generated

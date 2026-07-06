@@ -1,4 +1,5 @@
 import os
+import json
 
 try:
     from dotenv import load_dotenv
@@ -9,9 +10,14 @@ except ImportError:  # pragma: no cover - exercised when optional dependency is 
 try:
     import psycopg
     from psycopg import sql
+    try:
+        from psycopg.types.json import Jsonb
+    except ImportError:  # pragma: no cover
+        Jsonb = None
 except ImportError:  # pragma: no cover - dry runs should not require psycopg
     psycopg = None
     sql = None
+    Jsonb = None
 
 from .synthetic_data_generator import table_generation_order
 
@@ -39,6 +45,8 @@ def _column_ddl(column):
 
 
 def _adapt(value):
+    if isinstance(value, (dict, list)):
+        return Jsonb(value) if Jsonb is not None else json.dumps(value, sort_keys=True)
     return value
 
 
