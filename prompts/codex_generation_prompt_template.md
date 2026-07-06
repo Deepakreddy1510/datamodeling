@@ -157,7 +157,21 @@ BEGIN_SYNTHETIC_VALUE_CATALOG_JSON
 }
 END_SYNTHETIC_VALUE_CATALOG_JSON
 
-The catalog must be specific to the business input and generated model. For every generated table and column, provide at least one useful rule: allowed_values, value_examples, value_pattern, numeric_min/numeric_max, date_rule, boolean_rule, calculation_rule, or relationship_rule.
+The catalog must be specific to the business input and generated model. Every generated DDL table must be covered by the Synthetic Data Value Catalog, including raw load tables (`raw_load.load_*` or `load_*`), staging tables (`staging.stg_*` or `stg_*`), warehouse dimensions (`warehouse.dim_*` or `dim_*`), warehouse facts (`warehouse.fact_*` or `fact_*`), and reporting-supporting generated columns where relevant. For every generated important column, provide at least one useful rule: allowed_values, value_examples, value_pattern, numeric_min/numeric_max, date_rule, boolean_rule, calculation_rule, or relationship_rule.
+
+The catalog must cover at least 80% of generated important columns. Repeated columns across layers should use reusable global catalog rules instead of duplicating the same rule many times. Global rules must use `"table_name": "*"`, blank `table_name`, `"scope": "global"`, or `"applies_to_all_tables": true`. Use table-specific rules when the same column name has different meanings in different tables.
+
+Technical metadata columns must also have generic technical rules or clear technical value patterns. Examples include `ingestion_id`, `loaded_at`, `source_file_name`, `source_system`, `batch_id`, `created_at`, `updated_at`, and `file_name`.
+
+Use global reusable rules for repeated business keys and shared attributes such as `customer_id`, `product_id`, `store_id`, `order_id`, `payment_id`, `delivery_id`, `city`, `region`, `customer_segment`, `product_category`, `unit_price`, `order_status`, `payment_status`, and `delivery_status`. Example global rules:
+
+```json
+{"table_name": "*", "column_name": "loaded_at", "semantic_role": "technical ingestion timestamp", "data_type": "timestamp", "date_rule": "current timestamp minus 0 to 30 days", "business_reason": "Shared technical load timestamp across raw and staging layers."}
+{"table_name": "*", "column_name": "source_file_name", "semantic_role": "source file lineage", "data_type": "varchar", "value_pattern": "{table_name}_{number}.csv", "business_reason": "Shared technical lineage rule for file-based inputs."}
+{"table_name": "*", "column_name": "customer_id", "semantic_role": "customer business key", "data_type": "varchar", "value_pattern": "CUST-{number}", "business_reason": "Reusable customer natural key across load, staging, and warehouse layers."}
+```
+
+Use exact table-column rules for columns whose meanings are layer- or table-specific, such as `dim_date.day_name`, `dim_date.month_name`, `effective_start_date`, `effective_end_date`, `is_current`, fact foreign keys like `customer_key`, `product_key`, `store_key`, and date keys like `order_date_key`, `payment_date_key`, `promised_date_key`, and `actual_date_key`.
 
 Do not return generic filler. Infer status, segment, category, type, method, amount, quantity, date, flag, FK, and calculated-column rules from the YAML business context, model intent, model blueprint, generated DDL, and relationships. This catalog is how Phase 2 generates realistic values; Phase 2 must not know business-specific domains in advance.
 

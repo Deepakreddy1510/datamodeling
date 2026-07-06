@@ -8,8 +8,12 @@ ANALYTICAL_TYPES = {"analytical_data_warehouse", "dimensional_model", "star_sche
 IMPORTANT_COLUMN_TOKENS = (
     "name", "status", "segment", "category", "type", "method", "city", "country",
     "amount", "price", "cost", "quantity", "count", "percentage", "rate", "score",
-    "date", "time", "flag", "boolean", "key", "_id",
+    "date", "time", "flag", "boolean", "key",
 )
+TECHNICAL_METADATA_COLUMNS = {
+    "ingestion_id", "loaded_at", "source_file_name", "source_system", "batch_id",
+    "created_at", "updated_at", "file_name",
+}
 
 
 def _combined_generation_text(generation_response):
@@ -69,6 +73,27 @@ def _ddl_tables_and_columns(text):
     return tables
 
 
+def _normalize_table_name(table_name):
+    return str(table_name or "").strip().strip('"').lower()
+
+
+def _unqualified_table_name(table_name):
+    return _normalize_table_name(table_name).split(".")[-1]
+
+
+def _is_global_rule(rule):
+    table = _normalize_table_name(rule.get("table_name"))
+    return table in {"", "*"} or rule.get("applies_to_all_tables") is True or rule.get("scope") == "global"
+
+
+def _is_important_column(column):
+    return column == "id" or column.endswith("_id") or any(token in column for token in IMPORTANT_COLUMN_TOKENS)
+
+
+def _is_technical_column(column):
+    return column in TECHNICAL_METADATA_COLUMNS
+
+
 def _parse_catalog(markdown):
     start = markdown.find(CATALOG_START)
     end = markdown.find(CATALOG_END)
@@ -78,6 +103,8 @@ def _parse_catalog(markdown):
         "catalog_rule_count": 0,
         "catalog_tables_covered": [],
         "catalog_columns_covered": [],
+        "catalog_global_columns_covered": [],
+        "technical_columns_using_known_fallback": [],
         "missing_catalog_rules": [],
         "catalog_coverage_percentage": 0,
         "catalog_parse_error": "",
@@ -105,14 +132,22 @@ def _parse_catalog(markdown):
     result["catalog_rule_count"] = len(valid_rules)
     table_cols = set()
     tables = set()
+    global_columns = set()
     for rule in valid_rules:
-        table = str(rule.get("table_name") or "").strip().strip('"').split(".")[-1].lower()
+        table = _normalize_table_name(rule.get("table_name"))
         column = str(rule.get("column_name") or "").strip().strip('"').lower()
-        if table and table != "*":
+        if _is_global_rule(rule):
+            global_columns.add(column)
+            continue
+        if table:
             tables.add(table)
             table_cols.add((table, column))
+            unqualified = _unqualified_table_name(table)
+            tables.add(unqualified)
+            table_cols.add((unqualified, column))
     result["catalog_tables_covered"] = sorted(tables)
     result["catalog_columns_covered"] = [f"{table}.{column}" for table, column in sorted(table_cols)]
+    result["catalog_global_columns_covered"] = sorted(global_columns)
     return result, catalog
 
 
@@ -122,27 +157,40 @@ def _catalog_coverage(markdown, catalog_checks):
         return
     covered = set()
     covered_tables = set(catalog_checks.get("catalog_tables_covered", []))
+    global_columns = set(catalog_checks.get("catalog_global_columns_covered", []))
     for item in catalog_checks.get("catalog_columns_covered", []):
         table, _, column = item.partition(".")
         covered.add((table, column))
     missing = []
+    technical_fallback = []
     total_important = 0
     covered_important = 0
     for table, columns in ddl_tables.items():
-        if table not in covered_tables:
-            missing.append(f"{table}: no catalog rule covers this generated table.")
+        table_has_exact_rule = table in covered_tables
+        table_has_global_coverage = False
         for column in columns:
-            important = column.endswith("_id") or any(token in column for token in IMPORTANT_COLUMN_TOKENS)
-            if not important:
+            if not _is_important_column(column):
+                continue
+            if _is_technical_column(column):
+                if column in global_columns or (table, column) in covered:
+                    table_has_global_coverage = True
+                else:
+                    technical_fallback.append(f"{table}.{column}")
                 continue
             total_important += 1
-            if (table, column) in covered:
+            if (table, column) in covered or column in global_columns:
                 covered_important += 1
+                if column in global_columns:
+                    table_has_global_coverage = True
             else:
-                missing.append(f"{table}.{column}: important column has no catalog rule.")
+                missing.append(f"{table}.{column}: important column has no exact or global catalog rule.")
+        if not table_has_exact_rule and not table_has_global_coverage:
+            nontechnical_important = [column for column in columns if _is_important_column(column) and not _is_technical_column(column)]
+            if nontechnical_important:
+                missing.append(f"{table}: no exact table rule and no important column covered by a global catalog rule.")
     catalog_checks["missing_catalog_rules"] = missing
+    catalog_checks["technical_columns_using_known_fallback"] = sorted(technical_fallback)
     catalog_checks["catalog_coverage_percentage"] = round((covered_important / total_important) * 100, 2) if total_important else 100
-
 
 def validate_generation_quality(generation_response, model_intent, model_blueprint):
     text = _combined_generation_text(generation_response)
