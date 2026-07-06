@@ -121,6 +121,11 @@ def _business_id_value(column, index):
     return f"{prefix}-{index:06d}"
 
 
+def _catalog_warning(stats, category, message):
+    stats.setdefault(category, []).append(message)
+    stats.setdefault("catalog_rule_warnings", []).append(message)
+
+
 def _pk_value(column, index, table_name, stats):
     dtype = column.data_type.lower()
     if "uuid" in dtype:
@@ -284,13 +289,17 @@ def normalize_value_for_column(value, column, stats=None):
 def _render_pattern(pattern, fake, table, column, index, stats, catalog, row=None):
     context = (catalog or {}).get("business_context", {}) if isinstance(catalog, dict) else {}
     date_text = (SYNTHETIC_BASE_DATE + timedelta(days=(index - 1) % 365)).strftime("%Y%m%d")
+    entity_name = table.name.replace("dim_", "").replace("fact_", "").replace("stg_", "").replace("load_", "").replace("_raw", "")
     replacements = {
         "business_name": context.get("business_name", "Business"),
         "table_name": table.name,
         "column_name": column.name,
+        "entity_name": entity_name,
         "number": f"{index:03d}",
         "row_number": f"{index:03d}",
         "line_number": str(((index - 1) % 5) + 1),
+        "sequence": f"{index:06d}",
+        "batch_number": f"BATCH-{index:06d}",
         "YYYYMMDD": date_text,
         "first_name": fake.first_name(),
         "last_name": fake.last_name(),
@@ -302,8 +311,23 @@ def _render_pattern(pattern, fake, table, column, index, stats, catalog, row=Non
     if value == "YYYYMMDD":
         value = date_text
     value = re.sub(r"\{0[0-9]*\}", lambda match: f"{index:0{len(match.group(0)) - 2}d}", value)
+    value = re.sub(r"\{(\d+)\s*-?\s*digit\s+number\}", lambda match: f"{index:0{int(match.group(1))}d}", value, flags=re.IGNORECASE)
+    word_widths = {"six": 6, "eight": 8, "ten": 10, "four": 4}
+    value = re.sub(
+        r"\{(six|eight|ten|four)\s+digit\s+number\}",
+        lambda match: f"{index:0{word_widths[match.group(1).lower()]}d}",
+        value,
+        flags=re.IGNORECASE,
+    )
     for key, replacement in replacements.items():
         value = value.replace("{" + key + "}", str(replacement))
+    if "{" in value or "}" in value:
+        _catalog_warning(
+            stats,
+            "unsupported_catalog_patterns",
+            f"{table.name}.{column.name}: unsupported value_pattern {pattern!r}; used DDL semantic fallback.",
+        )
+        return None
     return normalize_value_for_column(value, column, stats)
 
 
@@ -368,7 +392,9 @@ def _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row=No
         return normalize_value_for_column(_cycle(examples, index, column, stats), column, stats)
     pattern = rule.get("value_pattern")
     if pattern:
-        return _render_pattern(str(pattern), fake, table, column, index, stats, catalog, row)
+        rendered_value = _render_pattern(str(pattern), fake, table, column, index, stats, catalog, row)
+        if rendered_value is not None:
+            return rendered_value
     if rule.get("numeric_min") is not None or rule.get("numeric_max") is not None:
         if any(token in column.data_type.lower() for token in ["int", "serial"]):
             min_value = int(rule.get("numeric_min") if rule.get("numeric_min") is not None else 1)
@@ -436,7 +462,43 @@ def _unique_adjusted_value(value, column, index, stats):
     return _bounded(f"{value} {index:03d}", column, stats)
 
 
-def _enforce_unique_constraints(table, row, seen_unique, index, stats):
+def _fk_parent_for_child(table, column_name):
+    for fk in table.foreign_keys:
+        for child_col, parent_col in zip(fk.child_columns, fk.parent_columns):
+            if child_col == column_name:
+                return fk.parent_table, parent_col
+    return None, None
+
+
+def _is_catalog_or_check_constrained(table, column_name, value_catalog):
+    rule = get_catalog_rule(value_catalog, table.name, column_name)
+    if rule and rule.get("allowed_values"):
+        return True
+    return any(
+        getattr(check, "supported", False)
+        and check.column == column_name
+        and check.operator == "IN"
+        and check.values
+        for check in getattr(table, "check_constraints", [])
+    )
+
+
+def _try_rotate_fk_value(table, row, unique_columns, column_name, generated, seen, index):
+    parent_table, parent_column = _fk_parent_for_child(table, column_name)
+    if not parent_table or parent_table not in generated:
+        return False
+    parent_rows = generated[parent_table]
+    if not parent_rows:
+        return False
+    for offset in range(len(parent_rows)):
+        candidate = parent_rows[(index - 1 + offset) % len(parent_rows)].get(parent_column)
+        row[column_name] = candidate
+        if tuple(row.get(col) for col in unique_columns) not in seen:
+            return True
+    return False
+
+
+def _enforce_unique_constraints(table, row, seen_unique, index, stats, generated, value_catalog):
     column_lookup = {column.name: column for column in table.columns}
     for unique in getattr(table, "unique_constraints", []):
         if not unique.columns:
@@ -446,12 +508,29 @@ def _enforce_unique_constraints(table, row, seen_unique, index, stats):
         if key not in seen:
             seen.add(key)
             continue
+        adjusted = False
+        for column_name in reversed(unique.columns):
+            if _try_rotate_fk_value(table, row, unique.columns, column_name, generated, seen, index):
+                stats.setdefault("fk_safe_unique_adjustments", set()).add(f"{table.name}.{','.join(unique.columns)}")
+                adjusted = True
+                break
+        if adjusted:
+            seen.add(tuple(row.get(col) for col in unique.columns))
+            continue
         for column_name in reversed(unique.columns):
             column = column_lookup.get(column_name)
-            if column is None:
+            if column is None or _fk_parent_for_child(table, column_name)[0] or _is_catalog_or_check_constrained(table, column_name, value_catalog):
                 continue
             row[column_name] = _unique_adjusted_value(row.get(column_name), column, index, stats)
+            stats.setdefault("composite_unique_adjustments", set()).add(f"{table.name}.{','.join(unique.columns)}")
+            adjusted = True
             break
+        if not adjusted:
+            _catalog_warning(
+                stats,
+                "unique_adjustment_warnings",
+                f"{table.name}: exhausted safe values for UNIQUE({', '.join(unique.columns)}); preserved DDL-safe FK/constrained values.",
+            )
         seen.add(tuple(row.get(col) for col in unique.columns))
 
 
@@ -630,8 +709,14 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
         "catalog_rule_count": (value_catalog or {}).get("rule_count", 0),
         "catalog_columns_used": set(),
         "fallback_columns_used": set(),
+        "fallback_to_ddl_inference_count": 0,
         "catalog_warnings": list((value_catalog or {}).get("warnings", [])),
         "catalog_errors": list((value_catalog or {}).get("errors", [])),
+        "catalog_rule_warnings": [],
+        "unsupported_catalog_patterns": [],
+        "unique_adjustment_warnings": [],
+        "fk_safe_unique_adjustments": set(),
+        "composite_unique_adjustments": set(),
         "generic_fallback_values": 0,
         "calculated_columns": set(),
         "relationship_rule_columns": set(),
@@ -663,6 +748,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
                     value = _catalog_value(rule, fake, rng, table, column, index, stats, catalog, row)
                 if value is None:
                     stats["fallback_columns_used"].add(f"{table.name}.{column.name}")
+                    stats["fallback_to_ddl_inference_count"] += 1
                     value = _fallback_value(fake, rng, table, column, index, stats)
                 row[column.name] = value
             for fk in table.foreign_keys:
@@ -673,7 +759,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
                     row[child_col] = parent_row[parent_col]
             _apply_catalog_relationships(table, row, index, generated, value_catalog, stats)
             _apply_lifecycle_order(row)
-            _enforce_unique_constraints(table, row, seen_unique, index, stats)
+            _enforce_unique_constraints(table, row, seen_unique, index, stats, generated, value_catalog)
             rows.append(row)
         generated[table.name] = rows
     _finalize_calculations(model, generated, value_catalog, stats)
@@ -681,5 +767,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, value_catalog
     stats["fallback_columns_used"] = sorted(stats["fallback_columns_used"])
     stats["calculated_columns"] = sorted(stats["calculated_columns"])
     stats["relationship_rule_columns"] = sorted(stats["relationship_rule_columns"])
+    stats["fk_safe_unique_adjustments"] = sorted(stats["fk_safe_unique_adjustments"])
+    stats["composite_unique_adjustments"] = sorted(stats["composite_unique_adjustments"])
     generated["__stats__"] = stats
     return generated

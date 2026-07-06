@@ -254,6 +254,63 @@ def test_catalog_pattern_applies_to_varchar_primary_key():
     assert data["stg_product"][0]["product_id"] == "PROD-000001"
 
 
+def test_natural_language_catalog_patterns_render_without_unresolved_braces():
+    model = parse_ddl("""
+CREATE TABLE natural_patterns (
+  customer_id varchar(30) PRIMARY KEY,
+  product_id varchar(30),
+  store_id varchar(30),
+  order_id varchar(40),
+  order_item_id varchar(40),
+  payment_id varchar(30),
+  delivery_id varchar(30)
+);
+""")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 7,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "natural_patterns", "column_name": "customer_id", "value_pattern": "CUST-{6 digit number}"},
+            {"table_name": "natural_patterns", "column_name": "product_id", "value_pattern": "PROD-{6 digit number}"},
+            {"table_name": "natural_patterns", "column_name": "store_id", "value_pattern": "STORE-{4 digit number}"},
+            {"table_name": "natural_patterns", "column_name": "order_id", "value_pattern": "ORD-{8 digit number}"},
+            {"table_name": "natural_patterns", "column_name": "order_item_id", "value_pattern": "OI-{10 digit number}"},
+            {"table_name": "natural_patterns", "column_name": "payment_id", "value_pattern": "PAY-{8 digit number}"},
+            {"table_name": "natural_patterns", "column_name": "delivery_id", "value_pattern": "DEL-{8 digit number}"},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=2, seed=1, value_catalog=catalog)
+    first = data["natural_patterns"][0]
+    assert first["customer_id"] == "CUST-000001"
+    assert first["product_id"] == "PROD-000001"
+    assert first["store_id"] == "STORE-0001"
+    assert first["order_id"] == "ORD-00000001"
+    assert first["order_item_id"] == "OI-0000000001"
+    assert first["payment_id"] == "PAY-00000001"
+    assert first["delivery_id"] == "DEL-00000001"
+    assert all("{" not in value and "}" not in value for value in first.values())
+
+
+def test_unsupported_catalog_pattern_falls_back_with_warning():
+    model = parse_ddl("CREATE TABLE unsupported_pattern (customer_id varchar(30) PRIMARY KEY, unit_price numeric(6,2));")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 2,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "unsupported_pattern", "column_name": "customer_id", "value_pattern": "CUST-{unknown token}"},
+            {"table_name": "unsupported_pattern", "column_name": "unit_price", "value_pattern": "{unknown token}", "numeric_min": 1, "numeric_max": 2},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=1, seed=1, value_catalog=catalog)
+    assert data["unsupported_pattern"][0]["customer_id"] == "CUST-000001"
+    assert data["unsupported_pattern"][0]["unit_price"] >= Decimal("1.00")
+    assert data["__stats__"]["unsupported_catalog_patterns"]
+
+
 def test_invalid_decimal_pattern_falls_back_without_crashing():
     model = parse_ddl("CREATE TABLE bad_pattern (id integer PRIMARY KEY, amount numeric(6,2));")
     catalog = {

@@ -166,7 +166,7 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
     catalog_warnings = list((value_catalog or {}).get("warnings", []))
     catalog_errors = list((value_catalog or {}).get("errors", []))
     if catalog_errors:
-        errors.extend(catalog_errors)
+        catalog_warnings.extend([f"Catalog parser error ignored for DDL-first generation: {error}" for error in catalog_errors])
     if (value_catalog or {}).get("markers_present") and (value_catalog or {}).get("rule_count", 0) == 0:
         catalog_warnings.append("Synthetic value catalog markers were present but no usable table_column_rules were found; used DDL-first semantic inference.")
     if _is_analytical_model(model) and not (value_catalog or {}).get("catalog_found"):
@@ -219,21 +219,21 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
                 if rule:
                     allowed = [_normalize_rule_value(item, column) for item in (rule.get("allowed_values") or [])]
                     if allowed and value not in allowed and value not in (None, ""):
-                        catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx} value {value!r} is not in allowed_values {allowed!r}.")
+                        catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx} value {value!r} is not in optional allowed_values hint {allowed!r}.")
                     numeric_min = rule.get("numeric_min")
                     numeric_max = rule.get("numeric_max")
                     if numeric_min is not None or numeric_max is not None:
                         decimal_value = _decimal(value)
                         if decimal_value is not None:
                             if numeric_min is not None and decimal_value < Decimal(str(numeric_min)):
-                                catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx} value {value!r} is below numeric_min {numeric_min}.")
+                                catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx} value {value!r} is below optional numeric_min hint {numeric_min}.")
                             if numeric_max is not None and decimal_value > Decimal(str(numeric_max)):
-                                catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx} value {value!r} is above numeric_max {numeric_max}.")
+                                catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx} value {value!r} is above optional numeric_max hint {numeric_max}.")
                     calculation_ok = _validate_calculation(rule, row, column)
                     if calculation_ok is False:
-                        calculation_errors.append(f"{table.name}.{column.name} row {idx}: calculation_rule {rule.get('calculation_rule')!r} is not satisfied.")
+                        calculation_errors.append(f"{table.name}.{column.name} row {idx}: optional calculation_rule {rule.get('calculation_rule')!r} is not satisfied.")
                     if _is_placeholder(value):
-                        catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx}: placeholder-like value {value!r} generated despite catalog rule.")
+                        catalog_compliance_errors.append(f"{table.name}.{column.name} row {idx}: placeholder-like value {value!r} generated despite optional catalog hint.")
                 elif _is_placeholder(value):
                     placeholder_warnings.append(f"{table.name}.{column.name} row {idx}: placeholder-like fallback value {value!r}.")
 
@@ -269,13 +269,13 @@ def validate_generated_data(model, data, expected_rows, value_catalog=None):
                 if child_key not in parent_keys:
                     errors.append(f"{table.name}: foreign key {fk.child_columns} value {child_key} not found in {parent.name}.")
                     break
-    errors.extend(catalog_compliance_errors)
     errors.extend(data_type_errors)
     errors.extend(constraint_errors)
     errors.extend(date_rule_errors)
     errors.extend(boolean_rule_errors)
-    errors.extend(calculation_errors)
-    status = "failed" if errors else ("passed_with_warnings" if skipped_fk_like_columns or placeholder_warnings else "passed")
+    catalog_warnings.extend(catalog_compliance_errors)
+    catalog_warnings.extend(calculation_errors)
+    status = "failed" if errors else ("passed_with_warnings" if skipped_fk_like_columns or placeholder_warnings or catalog_warnings else "passed")
     return {
         "status": status,
         "errors": errors,

@@ -163,4 +163,66 @@ CREATE TABLE dim_location (
     data = generate_synthetic_data(model, rows_per_table=40, seed=1)
     tuples = {(row["city"], row["region"], row["country"]) for row in data["dim_location"]}
     assert len(tuples) == 40
-    assert validate_generated_data(model, data, 40)["status"] == "passed"
+    assert validate_generated_data(model, data, 40)["status"] in {"passed", "passed_with_warnings"}
+
+
+def test_malformed_catalog_is_non_blocking_for_generation_and_validation():
+    model = parse_ddl("CREATE TABLE dim_customer (customer_id varchar(20) PRIMARY KEY, customer_name varchar(50));")
+    malformed_catalog = {
+        "catalog_found": False,
+        "markers_present": True,
+        "warnings": [],
+        "errors": ["Synthetic value catalog JSON is invalid"],
+        "rule_count": 0,
+        "catalog": {},
+    }
+    data = generate_synthetic_data(model, rows_per_table=3, seed=1, value_catalog=malformed_catalog)
+    result = validate_generated_data(model, data, 3, value_catalog=malformed_catalog)
+    assert result["status"] == "passed_with_warnings"
+    assert data["dim_customer"][0]["customer_id"] == "CUST-000001"
+    assert result["errors"] == []
+
+
+def test_fk_safe_unique_constraint_does_not_mutate_fk_values():
+    model = parse_ddl("""
+CREATE TABLE dim_order (order_id varchar(30) PRIMARY KEY);
+CREATE TABLE dim_product (product_id varchar(30) PRIMARY KEY);
+CREATE TABLE fact_sales (
+  sales_key integer PRIMARY KEY,
+  order_id varchar(30) REFERENCES dim_order(order_id),
+  product_id varchar(30) REFERENCES dim_product(product_id),
+  UNIQUE (order_id, product_id)
+);
+""")
+    data = generate_synthetic_data(model, rows_per_table=20, seed=1)
+    product_ids = {row["product_id"] for row in data["dim_product"]}
+    order_ids = {row["order_id"] for row in data["dim_order"]}
+    assert {row["product_id"] for row in data["fact_sales"]} <= product_ids
+    assert {row["order_id"] for row in data["fact_sales"]} <= order_ids
+    assert validate_generated_data(model, data, 20)["status"] in {"passed", "passed_with_warnings"}
+
+
+def test_composite_unique_keeps_constrained_country_value():
+    model = parse_ddl("""
+CREATE TABLE dim_location (
+  location_key integer PRIMARY KEY,
+  city varchar(40),
+  region varchar(40),
+  country varchar(40),
+  UNIQUE (city, region, country)
+);
+""")
+    catalog = {
+        "catalog_found": True,
+        "rule_count": 1,
+        "warnings": [],
+        "errors": [],
+        "catalog": {"table_column_rules": [
+            {"table_name": "dim_location", "column_name": "country", "allowed_values": ["India"]},
+        ]},
+    }
+    data = generate_synthetic_data(model, rows_per_table=100, seed=1, value_catalog=catalog)
+    tuples = {(row["city"], row["region"], row["country"]) for row in data["dim_location"]}
+    assert len(tuples) == 100
+    assert {row["country"] for row in data["dim_location"]} == {"India"}
+    assert validate_generated_data(model, data, 100, value_catalog=catalog)["status"] in {"passed", "passed_with_warnings"}
