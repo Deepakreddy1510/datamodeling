@@ -40,6 +40,9 @@ except ImportError:  # pragma: no cover - exercised when optional dependency is 
         def sentence(self, nb_words=8):
             return " ".join(self.word() for _ in range(nb_words)).capitalize() + "."
 
+from .semantic_context import build_semantic_context
+
+
 class SyntheticDataError(Exception):
     pass
 
@@ -544,47 +547,88 @@ def _generic_label(prefix, index):
     return f"{prefix} {index:03d}"
 
 
-def _fallback_value(fake, rng, table, column, index, stats):
+
+def _context_phrase(semantic_context, fallback="Item"):
+    terms = []
+    if semantic_context is not None:
+        terms.extend(getattr(semantic_context, "domain_terms", [])[:2])
+        terms.extend(getattr(semantic_context, "entity_terms", [])[:1])
+    cleaned = [term.replace("_", " ").title() for term in terms if term]
+    return " ".join(cleaned[:3]) or fallback
+
+
+def _semantic_type_for(semantic_context, table, column):
+    if semantic_context is None:
+        return None
+    semantic = semantic_context.semantic_for(table.name, column.name)
+    return semantic.semantic_type if semantic else None
+
+
+def _name_parts_from_row(row):
+    for key, value in row.items():
+        lowered = key.lower()
+        if "name" in lowered and isinstance(value, str) and " " in value:
+            parts = value.split()
+            return parts[0], parts[-1]
+    first = next((value for key, value in row.items() if key.lower().endswith("first_name") and isinstance(value, str)), None)
+    last = next((value for key, value in row.items() if key.lower().endswith("last_name") and isinstance(value, str)), None)
+    return first, last
+
+
+def _apply_semantic_consistency(table, row, index, stats):
+    first, last = _name_parts_from_row(row)
+    for column in table.columns:
+        name = column.name.lower()
+        if "email" in name and first and last:
+            row[column.name] = _short_email(index, column, stats, first, last)
+    order_like = row.get("order_date") or row.get("created_at")
+    payment_like = row.get("payment_date")
+    if isinstance(order_like, date) and isinstance(payment_like, date) and payment_like < order_like:
+        row["payment_date"] = order_like
+
+
+def _fallback_value(fake, rng, table, column, index, stats, semantic_context=None):
     name = column.name.lower()
     dtype = column.data_type.lower()
     table_base = table.name.replace("dim_", "").replace("fact_", "").replace("stg_", "").replace("load_", "").replace("_raw", "")
     title = table_base.replace("_", " ").title() or "Item"
+    semantic_type = _semantic_type_for(semantic_context, table, column)
+    context_label = _context_phrase(semantic_context, title)
 
-    if "email" in name:
+    if semantic_type == "json" or _is_json_type(column):
+        return {"generated": True, "row_number": index, "source": "synthetic", "semantic": table_base}
+    if semantic_type == "email" or "email" in name:
         return _short_email(index, column, stats, fake.first_name(), fake.last_name())
-    if "phone" in name:
+    if semantic_type == "phone" or "phone" in name:
         return _bounded(f"+1555{index:07d}", column, stats)
-    if "address" in name:
+    if semantic_type == "address" or "address" in name:
         return _bounded(fake.street_address(), column, stats)
-    if "city" in name:
+    if semantic_type == "city" or "city" in name:
         return _bounded(fake.city(), column, stats)
-    if "country" in name:
+    if semantic_type == "country" or "country" in name:
         return _bounded(fake.country(), column, stats)
-    if _is_json_type(column):
-        return {"generated": True, "row_number": index, "source": "synthetic"}
     if _is_date_key_column(column) and _is_integer_type(column):
         return _date_key_value(index)
     if name.endswith("_id") and any(token in dtype for token in ["char", "text"]):
         return _bounded(_business_id_value(column, index), column, stats)
-    if any(token in name for token in ["customer_name", "employee_name", "patient_name", "person_name", "contact_name"]):
+    if semantic_type == "person_name" or any(token in name for token in ["customer_name", "employee_name", "patient_name", "person_name", "contact_name"]):
         return _bounded(fake.name(), column, stats)
     if "first_name" in name:
         return _bounded(fake.first_name(), column, stats)
     if "last_name" in name:
         return _bounded(fake.last_name(), column, stats)
-    if any(token in name for token in ["product_name", "service_name", "item_name"]):
-        return _bounded(f"{title} {fake.word().title()} {index:03d}", column, stats)
-    if any(token in name for token in ["store_name", "branch_name", "location_name"]):
-        business_name = stats.get("business_name") or title
-        return _bounded(f"{business_name} {fake.city()} Location {index:03d}", column, stats)
-    if name.endswith("status") or name == "status":
+    if semantic_type == "product_or_service" or any(token in name for token in ["product_name", "service_name", "item_name"]):
+        return _bounded(f"{context_label} {fake.word().title()} {index:03d}", column, stats)
+    if any(token in name for token in ["store_name", "branch_name", "location_name", "company_name", "organization_name"]):
+        return _bounded(f"{context_label} {fake.city()} {title} {index:03d}", column, stats)
+    if semantic_type == "status" or name.endswith("status") or name == "status":
         return _cycle(GENERIC_STATUSES, index, column, stats)
-    if "segment" in name:
+    if semantic_type == "category" and "segment" in name:
         return _cycle(GENERIC_SEGMENTS, index, column, stats)
-    if "method" in name:
+    if semantic_type == "method" or "method" in name:
         return _cycle(GENERIC_METHODS, index, column, stats)
-    if "category" in name or name.endswith("type") or name == "type":
-        return _bounded(f"{title} {GENERIC_TYPES[(index - 1) % len(GENERIC_TYPES)]}", column, stats)
+    if semantic_type == "category" or "category" in name or name.endswith("type") or name == "type":
+        return _bounded(f"{context_label} {GENERIC_TYPES[(index - 1) % len(GENERIC_TYPES)]}", column, stats)
     if "date" in dtype or name.endswith("date"):
         return date.today() - timedelta(days=rng.randint(0, 730))
     if dtype.startswith("time") and "timestamp" not in dtype:
@@ -612,7 +656,7 @@ def _fallback_value(fake, rng, table, column, index, stats):
     if "name" in name:
         return _bounded(_generic_label(title, index), column, stats)
     stats["generic_fallback_values"] += 1
-    return _bounded(f"Value {index:03d}", column, stats)
+    return _bounded(f"Synthetic {context_label} {index:03d}", column, stats)
 
 
 def _to_decimal(value):
@@ -665,12 +709,14 @@ def _finalize_calculations(model, generated, stats):
                     stats["calculated_columns"].add(f"{table.name}.{column.name}")
 
 
-def generate_synthetic_data(model, rows_per_table=100, seed=12345):
+def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_context=None, business_input=None):
     fake = Faker()
     Faker.seed(seed)
     rng = random.Random(seed)
     generated = {}
     table_map = model.table_map()
+    if semantic_context is None:
+        semantic_context = build_semantic_context(business_input or {}, model)
     stats = {
         "truncated_values": 0,
         "numeric_bounded_values": 0,
@@ -685,7 +731,12 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345):
         "calculated_columns": set(),
         "calculation_warnings": [],
         "type_normalization_warnings": [],
+        "semantic_types": {},
+        "semantic_context_terms": list(getattr(semantic_context, "domain_terms", [])[:10]),
     }
+    for semantic in getattr(semantic_context, "column_semantics", {}).values():
+        stats["semantic_types"].setdefault(semantic.semantic_type, 0)
+        stats["semantic_types"][semantic.semantic_type] += 1
 
     for table in table_generation_order(model):
         _detect_constraint_capacity(table, rows_per_table)
@@ -704,7 +755,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345):
                 if value is None:
                     stats["fallback_columns_used"].add(f"{table.name}.{column.name}")
                     stats["fallback_to_ddl_inference_count"] += 1
-                    value = _fallback_value(fake, rng, table, column, index, stats)
+                    value = _fallback_value(fake, rng, table, column, index, stats, semantic_context)
                 row[column.name] = value
             for fk in table.foreign_keys:
                 parent = table_map[fk.parent_table.lower()]
@@ -712,6 +763,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345):
                 parent_row = parent_rows[(index - 1) % len(parent_rows)]
                 for child_col, parent_col in zip(fk.child_columns, fk.parent_columns):
                     row[child_col] = parent_row[parent_col]
+            _apply_semantic_consistency(table, row, index, stats)
             _apply_lifecycle_order(row)
             _enforce_primary_key(table, row, seen_primary_keys, index, stats)
             _enforce_unique_constraints(table, row, seen_unique, index, stats, generated)

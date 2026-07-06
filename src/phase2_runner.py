@@ -7,6 +7,7 @@ from phase2.ddl_parser import DDLParserError, parse_ddl
 from phase2.excel_writer import write_excel
 from phase2.postgres_loader import load_to_postgres, validate_postgres_load
 from phase2.report_writer import write_generation_report, write_postgres_report, write_validation_report
+from phase2.semantic_context import build_semantic_context
 from phase2.synthetic_data_generator import SyntheticDataError, generate_synthetic_data
 from phase2.validator import validate_generated_data
 from yaml_loader import load_yaml_file
@@ -62,7 +63,8 @@ def main():
         markdown = phase1_output.read_text(encoding="utf-8")
         ddl_text = extract_ddl(markdown)
         model = parse_ddl(ddl_text)
-        data = generate_synthetic_data(model, args.rows_per_table, args.seed)
+        semantic_context = build_semantic_context(business_input, model)
+        data = generate_synthetic_data(model, args.rows_per_table, args.seed, semantic_context=semantic_context)
         pre_validation = validate_generated_data(model, data, args.rows_per_table)
         pre_validation["generation_stats"] = data.get("__stats__", {})
         pre_validation["excel_written"] = False

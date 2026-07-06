@@ -59,6 +59,12 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     lines.extend(["", "### FK-like Columns Skipped Because No FK Exists in DDL", ""])
     lines.extend([f"- {item}" for item in validation.get("skipped_fk_like_columns", [])] or ["- None"])
 
+    lines.extend(["", "## Semantic Inference Summary", ""])
+    lines.append(f"- Context terms: {', '.join(stats.get('semantic_context_terms', [])) or 'None'}")
+    lines.append("- Generated semantic types:")
+    for semantic_type, count in sorted(stats.get('semantic_types', {}).items()):
+        lines.append(f"  - {semantic_type}: {count}")
+
     lines.extend(["", "## DDL-Only Generation Strategy", ""])
     lines.append(f"- Columns generated using DDL/name inference: {len(stats.get('fallback_columns_used', []))}")
     lines.append(f"- Fallback-to-DDL inference count: {stats.get('fallback_to_ddl_inference_count', 0)}")
@@ -100,7 +106,7 @@ def write_postgres_report(path, load_requested, result):
 def write_validation_report(path, pre_validation, post_validation=None):
     final_status = _overall_status(pre_validation.get("status"), post_validation.get("status") if post_validation else None)
     stats = pre_validation.get("generation_stats", {})
-    lines = ["# Validation Report", "", f"- Final status: **{final_status}**", f"- DDL validation status: **{'failed' if pre_validation.get('errors') else 'passed'}**", f"- Fallback inference count: {stats.get('fallback_to_ddl_inference_count', 0)}", f"- Placeholder warning count: {len(pre_validation.get('placeholder_warnings', []))}", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
+    lines = ["# Validation Report", "", f"- Final status: **{final_status}**", f"- DDL validation status: **{'failed' if pre_validation.get('errors') else 'passed'}**", f"- Fallback inference count: {stats.get('fallback_to_ddl_inference_count', 0)}", f"- Semantic type count: {len(stats.get('semantic_types', {}))}", f"- Placeholder warning count: {len(pre_validation.get('placeholder_warnings', []))}", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
     lines.extend([f"- {error}" for error in pre_validation.get("errors", [])] or ["- No validation errors."])
     lines.extend(["", "## FK Validation Coverage", "", "### Parsed FK Relationships", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("parsed_fk_relationships", [])] or ["- None"])
