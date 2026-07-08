@@ -1,0 +1,497 @@
+business_name: Lloyds Car Trading Market Entry Analytics
+business_type: Digital automotive marketplace and financial-services analytics
+business_description: >
+  Lloyds is evaluating entry into the UK online car trading market. The available source data is incomplete because
+  the HR-provided files are aggregated web analytics exports rather than visitor-level records. The model must preserve
+  the original aggregate CSV files as separate staging inputs and use synthetic session-level data only as an approved
+  add-on bridge for prototype analysis.
+model_purpose: >
+  Generate a PostgreSQL-ready conceptual, logical, and physical data warehouse model that supports raw-source
+  preservation, staging validation, dimensional modelling, synthetic session analytics, reporting views, and Phase 2
+  synthetic data generation/loading.
+target_database: PostgreSQL
+target_schema: lloyds_car_trading_phase2
+
+target_database_selection:
+  selected_database: PostgreSQL
+  reason: >
+    PostgreSQL supports staging tables, dimensional models, constraints, indexes, audit metadata, reporting views,
+    and controlled synthetic data loading for the accelerator Phase 2 workflow.
+
+source_data:
+  reporting_period: Mar 18, 8am to Jun 18, 9:59am
+  source_nature: Eight original HR aggregate web analytics files plus approved synthetic add-on session data
+  original_files_preserved: true
+  synthetic_addon_required: true
+  source_files:
+    - source_report_type: country
+      file_name: Top Countries - Mar 18, 8am - Jun 18, 9_59am.csv
+      staging_table: stg_country_raw
+      original_columns: [Page, Visitors, Total]
+      mapped_columns: [raw_country_value, visitors, total]
+      business_meaning: Country-level traffic aggregate report.
+    - source_report_type: device
+      file_name: Top Devices - Mar 18, 8am - Jun 18, 9_59am.csv
+      staging_table: stg_device_raw
+      original_columns: [Page, Visitors, Total]
+      mapped_columns: [raw_device_value, visitors, total]
+      business_meaning: Device-level traffic aggregate report.
+    - source_report_type: browser
+      file_name: Top Browsers - Mar 18, 8am - Jun 18, 9_59am.csv
+      staging_table: stg_browser_raw
+      original_columns: [Page, Visitors, Total]
+      mapped_columns: [raw_browser_value, visitors, total]
+      business_meaning: Browser-level traffic aggregate report.
+    - source_report_type: operating_system
+      file_name: Top Operating Systems - Mar 18, 8am - Jun 18, 9_59am.csv
+      staging_table: stg_operating_system_raw
+      original_columns: [Page, Visitors, Total]
+      mapped_columns: [raw_operating_system_value, visitors, total]
+      business_meaning: Operating-system-level traffic aggregate report.
+    - source_report_type: page
+      file_name: Top Pages - Mar 18, 8am - Jun 18, 9_59am.csv
+      staging_table: stg_page_raw
+      original_columns: [Page, Visitors, Total]
+      mapped_columns: [raw_page_value, visitors, total]
+      business_meaning: Page-level traffic aggregate report.
+    - source_report_type: referrer
+      file_name: Top Referrers - Mar 18, 8am - Jun 18, 9_59am.csv
+      staging_table: stg_referrer_raw
+      original_columns: [Page, Visitors, Total]
+      mapped_columns: [raw_referrer_value, visitors, total]
+      business_meaning: Referrer-level traffic aggregate report.
+    - source_report_type: utm_parameter
+      file_name: Top UTM Parameters - Mar 18, 8am - Jun 18, 9_59am.csv
+      staging_table: stg_utm_parameter_raw
+      original_columns: [Page, Visitors, Total]
+      mapped_columns: [raw_utm_parameter_value, visitors, total]
+      business_meaning: UTM-parameter aggregate report.
+    - source_report_type: event
+      file_name: Top Events - Mar 18, 8am - Jun 18, 9_59am.csv
+      staging_table: stg_event_raw
+      original_columns: [Page, Visitors, Total]
+      mapped_columns: [raw_event_value, visitors, total]
+      business_meaning: Event-level traffic aggregate report.
+    - source_report_type: synthetic_session
+      file_name: synthetic_web_sessions.csv
+      staging_table: stg_synthetic_web_session_raw
+      expected_row_count: 100
+      grain: One approved synthetic web session per row.
+      business_meaning: Synthetic bridge used only to prototype cross-dimensional session analytics.
+
+important_modeling_instruction: >
+  Do not combine the eight HR aggregate files into a single generic source_aggregate_row table. Each raw file must
+  have its own staging table. Aggregate visitors/total metrics must stay at aggregate-source grain and must not be
+  treated as session-level metrics. Synthetic session rows are add-on data for prototype joins and reporting only.
+
+data_engineering_process:
+  required_flow: Raw CSV files -> separate staging tables -> validation -> dimensions -> fact table -> reporting views -> Phase 2 synthetic data load
+  schema_name: lloyds_car_trading_phase2
+  process_steps:
+    - Load each original HR aggregate CSV into its own stg_* table.
+    - Load synthetic session add-on rows into stg_synthetic_web_session_raw.
+    - Validate row counts, nulls, data types, and source file names.
+    - Build dimensions from distinct clean staging and synthetic values.
+    - Load fact_web_session from synthetic sessions after dimension keys exist.
+    - Create reporting views for JAI analysis and reconciliation.
+
+main_business_processes:
+  - process_name: UK Market Entry Traffic Analysis
+    description: Understand country and market-level signals for UK car-trading entry.
+    key_data_used: [country, region, market_segment, visitors, total, session_id]
+  - process_name: Campaign and Channel Analysis
+    description: Understand UTM, campaign theme, and referrer performance.
+    key_data_used: [utm_parameter, campaign_id, campaign_theme, referrer, session_id]
+  - process_name: Digital Experience Analysis
+    description: Understand device, browser, operating system, page, and event behaviour.
+    key_data_used: [device, browser, operating_system, page, event, session_id]
+  - process_name: Vehicle Interest Analysis
+    description: Understand vehicle body type, fuel type, budget band, and intent signals.
+    key_data_used: [vehicle_segment, fuel_type, budget_band, purchase_intent_score]
+  - process_name: Lead Funnel Analysis
+    description: Understand where customers convert or drop off.
+    key_data_used: [lead_status, funnel_stage, enquiry_type, conversion_flag]
+  - process_name: Raw to Final Reconciliation
+    description: Validate source-to-target counts and audit lineage.
+    key_data_used: [load_batch_id, source_file_name, staging_row_count, fact_row_count]
+
+key_business_entities:
+  - name: audit_load_batch
+    entity_type: audit
+    grain: One load batch per accelerator run.
+  - name: stg_country_raw
+    entity_type: staging
+    grain: One raw country aggregate row.
+  - name: stg_device_raw
+    entity_type: staging
+    grain: One raw device aggregate row.
+  - name: stg_browser_raw
+    entity_type: staging
+    grain: One raw browser aggregate row.
+  - name: stg_operating_system_raw
+    entity_type: staging
+    grain: One raw operating-system aggregate row.
+  - name: stg_page_raw
+    entity_type: staging
+    grain: One raw page aggregate row.
+  - name: stg_referrer_raw
+    entity_type: staging
+    grain: One raw referrer aggregate row.
+  - name: stg_utm_parameter_raw
+    entity_type: staging
+    grain: One raw UTM aggregate row.
+  - name: stg_event_raw
+    entity_type: staging
+    grain: One raw event aggregate row.
+  - name: stg_synthetic_web_session_raw
+    entity_type: staging
+    grain: One synthetic web session row.
+  - name: dim_market
+    entity_type: dimension
+    grain: One market/country segment.
+  - name: dim_campaign
+    entity_type: dimension
+    grain: One campaign theme or UTM grouping.
+  - name: dim_channel
+    entity_type: dimension
+    grain: One traffic/referrer channel.
+  - name: dim_device
+    entity_type: dimension
+    grain: One device/browser/operating-system combination.
+  - name: dim_page
+    entity_type: dimension
+    grain: One website page or page group.
+  - name: dim_event
+    entity_type: dimension
+    grain: One digital event type.
+  - name: dim_vehicle_interest
+    entity_type: dimension
+    grain: One vehicle interest profile.
+  - name: dim_customer_profile
+    entity_type: synthetic_dimension
+    grain: One synthetic customer profile.
+  - name: dim_reporting_period
+    entity_type: dimension
+    grain: One reporting period.
+  - name: fact_web_session
+    entity_type: fact
+    grain: One synthetic web session.
+  - name: fact_lead_funnel
+    entity_type: fact
+    grain: One synthetic lead/funnel outcome.
+
+entity_attributes:
+  audit_load_batch:
+    primary_key: load_batch_id
+    attributes:
+      - {name: load_batch_id, data_type: integer, nullable: false, business_definition: Unique batch identifier.}
+      - {name: batch_name, data_type: varchar(100), nullable: false, business_definition: Human-readable batch name.}
+      - {name: source_system, data_type: varchar(100), nullable: false, business_definition: Source system name.}
+      - {name: load_started_at, data_type: timestamp, nullable: false, business_definition: Load start timestamp.}
+      - {name: load_completed_at, data_type: timestamp, nullable: true, business_definition: Load completion timestamp.}
+      - {name: load_status, data_type: varchar(50), nullable: false, business_definition: Load status.}
+  staging_common_columns: &staging_common_columns
+    - {name: source_file_name, data_type: varchar(255), nullable: false, business_definition: Source CSV file name.}
+    - {name: reporting_period, data_type: varchar(100), nullable: false, business_definition: Source reporting period.}
+    - {name: visitors, data_type: integer, nullable: false, business_definition: Source aggregate visitor count.}
+    - {name: total, data_type: integer, nullable: false, business_definition: Source aggregate total count.}
+    - {name: load_batch_id, data_type: integer, nullable: false, foreign_key: audit_load_batch.load_batch_id, business_definition: Batch lineage key.}
+    - {name: load_created_at, data_type: timestamp, nullable: false, business_definition: Staging load timestamp.}
+  stg_country_raw:
+    primary_key: stg_country_id
+    attributes:
+      - {name: stg_country_id, data_type: integer, nullable: false, business_definition: Staging country row key.}
+      - {name: raw_country_value, data_type: varchar(100), nullable: false, business_definition: Raw country value from Page column.}
+      - *staging_common_columns
+  stg_device_raw:
+    primary_key: stg_device_id
+    attributes:
+      - {name: stg_device_id, data_type: integer, nullable: false, business_definition: Staging device row key.}
+      - {name: raw_device_value, data_type: varchar(100), nullable: false, business_definition: Raw device value from Page column.}
+      - *staging_common_columns
+  stg_browser_raw:
+    primary_key: stg_browser_id
+    attributes:
+      - {name: stg_browser_id, data_type: integer, nullable: false, business_definition: Staging browser row key.}
+      - {name: raw_browser_value, data_type: varchar(100), nullable: false, business_definition: Raw browser value from Page column.}
+      - *staging_common_columns
+  stg_operating_system_raw:
+    primary_key: stg_operating_system_id
+    attributes:
+      - {name: stg_operating_system_id, data_type: integer, nullable: false, business_definition: Staging operating system row key.}
+      - {name: raw_operating_system_value, data_type: varchar(100), nullable: false, business_definition: Raw operating system value.}
+      - *staging_common_columns
+  stg_page_raw:
+    primary_key: stg_page_id
+    attributes:
+      - {name: stg_page_id, data_type: integer, nullable: false, business_definition: Staging page row key.}
+      - {name: raw_page_value, data_type: varchar(255), nullable: false, business_definition: Raw page path or page label.}
+      - *staging_common_columns
+  stg_referrer_raw:
+    primary_key: stg_referrer_id
+    attributes:
+      - {name: stg_referrer_id, data_type: integer, nullable: false, business_definition: Staging referrer row key.}
+      - {name: raw_referrer_value, data_type: varchar(255), nullable: false, business_definition: Raw referrer value.}
+      - *staging_common_columns
+  stg_utm_parameter_raw:
+    primary_key: stg_utm_parameter_id
+    attributes:
+      - {name: stg_utm_parameter_id, data_type: integer, nullable: false, business_definition: Staging UTM row key.}
+      - {name: raw_utm_parameter_value, data_type: varchar(255), nullable: false, business_definition: Raw UTM parameter value.}
+      - *staging_common_columns
+  stg_event_raw:
+    primary_key: stg_event_id
+    attributes:
+      - {name: stg_event_id, data_type: integer, nullable: false, business_definition: Staging event row key.}
+      - {name: raw_event_value, data_type: varchar(150), nullable: false, business_definition: Raw event value.}
+      - *staging_common_columns
+  stg_synthetic_web_session_raw:
+    primary_key: session_id
+    attributes:
+      - {name: session_id, data_type: varchar(50), nullable: false, business_definition: Synthetic session identifier.}
+      - {name: synthetic_customer_id, data_type: varchar(50), nullable: false, business_definition: Synthetic customer identifier.}
+      - {name: country, data_type: varchar(100), nullable: false, business_definition: Synthetic country matching raw country values.}
+      - {name: device, data_type: varchar(100), nullable: false, business_definition: Synthetic device matching raw device values.}
+      - {name: browser, data_type: varchar(100), nullable: false, business_definition: Synthetic browser matching raw browser values.}
+      - {name: operating_system, data_type: varchar(100), nullable: false, business_definition: Synthetic operating-system value.}
+      - {name: page, data_type: varchar(255), nullable: false, business_definition: Synthetic page value.}
+      - {name: referrer, data_type: varchar(255), nullable: false, business_definition: Synthetic referrer value.}
+      - {name: utm_parameter, data_type: varchar(255), nullable: true, business_definition: Synthetic UTM parameter value.}
+      - {name: event, data_type: varchar(150), nullable: false, business_definition: Synthetic event value.}
+      - {name: vehicle_segment, data_type: varchar(100), nullable: false, business_definition: Interested vehicle segment.}
+      - {name: fuel_type, data_type: varchar(50), nullable: false, business_definition: Petrol, diesel, hybrid, or electric interest.}
+      - {name: budget_band, data_type: varchar(50), nullable: false, business_definition: Customer budget band.}
+      - {name: campaign_theme, data_type: varchar(100), nullable: false, business_definition: Campaign theme.}
+      - {name: funnel_stage, data_type: varchar(50), nullable: false, business_definition: Funnel stage reached.}
+      - {name: lead_status, data_type: varchar(50), nullable: false, business_definition: Lead outcome status.}
+      - {name: purchase_intent_score, data_type: numeric(5,2), nullable: false, business_definition: Intent score from 0 to 100.}
+      - {name: conversion_flag, data_type: boolean, nullable: false, business_definition: Whether session converted to lead.}
+      - {name: load_batch_id, data_type: integer, nullable: false, foreign_key: audit_load_batch.load_batch_id, business_definition: Batch lineage key.}
+  dim_market:
+    primary_key: market_key
+    natural_key: [country_name, market_segment]
+    attributes:
+      - {name: market_key, data_type: integer, nullable: false, business_definition: Surrogate key.}
+      - {name: country_name, data_type: varchar(100), nullable: false, business_definition: Country name.}
+      - {name: region_name, data_type: varchar(100), nullable: true, business_definition: Region grouping.}
+      - {name: market_segment, data_type: varchar(100), nullable: false, business_definition: Market segment.}
+  dim_campaign:
+    primary_key: campaign_key
+    natural_key: [campaign_theme, utm_parameter]
+    attributes:
+      - {name: campaign_key, data_type: integer, nullable: false, business_definition: Surrogate key.}
+      - {name: campaign_theme, data_type: varchar(100), nullable: false, business_definition: Campaign theme.}
+      - {name: utm_parameter, data_type: varchar(255), nullable: true, business_definition: UTM parameter.}
+      - {name: campaign_objective, data_type: varchar(100), nullable: true, business_definition: Campaign objective.}
+  dim_channel:
+    primary_key: channel_key
+    natural_key: [referrer_domain, channel_group]
+    attributes:
+      - {name: channel_key, data_type: integer, nullable: false, business_definition: Surrogate key.}
+      - {name: referrer_domain, data_type: varchar(255), nullable: false, business_definition: Referrer domain or source.}
+      - {name: channel_group, data_type: varchar(100), nullable: false, business_definition: Direct, organic, paid, referral, or social.}
+  dim_device:
+    primary_key: device_key
+    natural_key: [device_type, browser_name, operating_system_name]
+    attributes:
+      - {name: device_key, data_type: integer, nullable: false, business_definition: Surrogate key.}
+      - {name: device_type, data_type: varchar(100), nullable: false, business_definition: Device type.}
+      - {name: browser_name, data_type: varchar(100), nullable: false, business_definition: Browser name.}
+      - {name: operating_system_name, data_type: varchar(100), nullable: false, business_definition: Operating system name.}
+  dim_page:
+    primary_key: page_key
+    natural_key: [page_path]
+    attributes:
+      - {name: page_key, data_type: integer, nullable: false, business_definition: Surrogate key.}
+      - {name: page_path, data_type: varchar(255), nullable: false, business_definition: Page path or label.}
+      - {name: page_group, data_type: varchar(100), nullable: false, business_definition: Page group.}
+  dim_event:
+    primary_key: event_key
+    natural_key: [event_name]
+    attributes:
+      - {name: event_key, data_type: integer, nullable: false, business_definition: Surrogate key.}
+      - {name: event_name, data_type: varchar(150), nullable: false, business_definition: Event name.}
+      - {name: event_group, data_type: varchar(100), nullable: false, business_definition: Event group.}
+  dim_vehicle_interest:
+    primary_key: vehicle_interest_key
+    natural_key: [vehicle_segment, fuel_type, budget_band]
+    attributes:
+      - {name: vehicle_interest_key, data_type: integer, nullable: false, business_definition: Surrogate key.}
+      - {name: vehicle_segment, data_type: varchar(100), nullable: false, business_definition: Vehicle body segment.}
+      - {name: fuel_type, data_type: varchar(50), nullable: false, business_definition: Fuel type interest.}
+      - {name: budget_band, data_type: varchar(50), nullable: false, business_definition: Budget band.}
+  dim_customer_profile:
+    primary_key: customer_profile_key
+    natural_key: [synthetic_customer_id]
+    attributes:
+      - {name: customer_profile_key, data_type: integer, nullable: false, business_definition: Surrogate key.}
+      - {name: synthetic_customer_id, data_type: varchar(50), nullable: false, business_definition: Synthetic customer identifier only.}
+      - {name: customer_segment, data_type: varchar(100), nullable: false, business_definition: Synthetic customer segment.}
+      - {name: preferred_payment_type, data_type: varchar(100), nullable: true, business_definition: Synthetic payment preference.}
+  dim_reporting_period:
+    primary_key: reporting_period_key
+    natural_key: [reporting_period]
+    attributes:
+      - {name: reporting_period_key, data_type: integer, nullable: false, business_definition: Surrogate key.}
+      - {name: reporting_period, data_type: varchar(100), nullable: false, business_definition: HR reporting period.}
+      - {name: period_start_date, data_type: date, nullable: true, business_definition: Reporting start date.}
+      - {name: period_end_date, data_type: date, nullable: true, business_definition: Reporting end date.}
+  fact_web_session:
+    primary_key: web_session_key
+    foreign_keys:
+      - {column: market_key, references: dim_market.market_key}
+      - {column: campaign_key, references: dim_campaign.campaign_key}
+      - {column: channel_key, references: dim_channel.channel_key}
+      - {column: device_key, references: dim_device.device_key}
+      - {column: page_key, references: dim_page.page_key}
+      - {column: event_key, references: dim_event.event_key}
+      - {column: vehicle_interest_key, references: dim_vehicle_interest.vehicle_interest_key}
+      - {column: customer_profile_key, references: dim_customer_profile.customer_profile_key}
+      - {column: reporting_period_key, references: dim_reporting_period.reporting_period_key}
+    measures: [session_count, purchase_intent_score, conversion_flag]
+  fact_lead_funnel:
+    primary_key: lead_funnel_key
+    foreign_keys:
+      - {column: web_session_key, references: fact_web_session.web_session_key}
+      - {column: customer_profile_key, references: dim_customer_profile.customer_profile_key}
+      - {column: vehicle_interest_key, references: dim_vehicle_interest.vehicle_interest_key}
+    measures: [lead_count, qualified_lead_count, conversion_flag]
+
+analytics_modeling:
+  recommended_model: Star schema with staging and audit layer in same PostgreSQL schema.
+  fact_tables:
+    - fact_web_session
+    - fact_lead_funnel
+  dimension_tables:
+    - dim_market
+    - dim_campaign
+    - dim_channel
+    - dim_device
+    - dim_page
+    - dim_event
+    - dim_vehicle_interest
+    - dim_customer_profile
+    - dim_reporting_period
+  staging_tables:
+    - stg_country_raw
+    - stg_device_raw
+    - stg_browser_raw
+    - stg_operating_system_raw
+    - stg_page_raw
+    - stg_referrer_raw
+    - stg_utm_parameter_raw
+    - stg_event_raw
+    - stg_synthetic_web_session_raw
+  modeling_notes:
+    - Aggregate visitors and total metrics remain in staging and aggregate reporting views.
+    - fact_web_session uses synthetic session grain only.
+    - The model must make raw-to-final lineage clear through load_batch_id and source_file_name.
+
+business_relationships:
+  - {from_entity: audit_load_batch, to_entity: stg_country_raw, relationship_type: one_to_many, join_rule: audit_load_batch.load_batch_id = stg_country_raw.load_batch_id}
+  - {from_entity: audit_load_batch, to_entity: stg_synthetic_web_session_raw, relationship_type: one_to_many, join_rule: audit_load_batch.load_batch_id = stg_synthetic_web_session_raw.load_batch_id}
+  - {from_entity: dim_market, to_entity: fact_web_session, relationship_type: one_to_many, join_rule: dim_market.market_key = fact_web_session.market_key}
+  - {from_entity: dim_campaign, to_entity: fact_web_session, relationship_type: one_to_many, join_rule: dim_campaign.campaign_key = fact_web_session.campaign_key}
+  - {from_entity: dim_channel, to_entity: fact_web_session, relationship_type: one_to_many, join_rule: dim_channel.channel_key = fact_web_session.channel_key}
+  - {from_entity: dim_device, to_entity: fact_web_session, relationship_type: one_to_many, join_rule: dim_device.device_key = fact_web_session.device_key}
+  - {from_entity: dim_page, to_entity: fact_web_session, relationship_type: one_to_many, join_rule: dim_page.page_key = fact_web_session.page_key}
+  - {from_entity: dim_event, to_entity: fact_web_session, relationship_type: one_to_many, join_rule: dim_event.event_key = fact_web_session.event_key}
+  - {from_entity: dim_vehicle_interest, to_entity: fact_web_session, relationship_type: one_to_many, join_rule: dim_vehicle_interest.vehicle_interest_key = fact_web_session.vehicle_interest_key}
+  - {from_entity: fact_web_session, to_entity: fact_lead_funnel, relationship_type: one_to_one_or_one_to_many, join_rule: fact_web_session.web_session_key = fact_lead_funnel.web_session_key}
+
+reporting_requirements:
+  - report_name: Market Entry Overview
+    questions_supported:
+      - Which countries and market segments show strongest traffic and session intent?
+      - Which vehicle segments and fuel types show strongest interest?
+    grain: country, market_segment, vehicle_segment, fuel_type
+    metrics: [visitor_total, session_count, average_purchase_intent_score, conversion_rate]
+  - report_name: Campaign and Channel Performance
+    questions_supported:
+      - Which campaign themes and UTM parameters drive high-intent sessions?
+      - Which referrers contribute to lead conversion?
+    grain: campaign_theme, utm_parameter, channel_group, referrer_domain
+    metrics: [session_count, lead_count, conversion_rate]
+  - report_name: Digital Drop-off Analysis
+    questions_supported:
+      - Which pages and events indicate drop-off?
+      - Are mobile users behaving differently from desktop users?
+    grain: page_group, event_group, device_type
+    metrics: [session_count, conversion_rate, average_purchase_intent_score]
+  - report_name: Raw Source Reconciliation
+    questions_supported:
+      - Were all raw files loaded?
+      - Are staging counts, dimension counts, and fact counts explainable?
+    grain: source_file_name, load_batch_id
+    metrics: [staging_row_count, dimension_row_count, fact_row_count]
+
+expected_output:
+  generate_sections:
+    - Conceptual Data Model
+    - Logical Data Model
+    - Physical Data Model
+    - ER Diagram
+    - Table Relationships
+    - Fact and Dimension Model
+    - PostgreSQL DDL
+    - Reporting Views
+    - Data Quality Rules
+    - Source to Target Mapping
+    - AI Additions / Assumptions
+  ddl_requirements:
+    schema_name: lloyds_car_trading_phase2
+    must_include_create_schema: true
+    must_include_create_tables: true
+    must_include_primary_keys: true
+    must_include_foreign_keys: true
+    must_include_indexes: true
+    must_include_reporting_views: true
+    phase2_friendly_rules:
+      - Use integer surrogate primary keys for dimensions and facts.
+      - Use explicit primary keys and foreign keys.
+      - Avoid narrow varchar sizes for generated text; use varchar(100), varchar(150), varchar(255), or text.
+      - Do not use varchar(30) for generated names, emails, product labels, campaign labels, page paths, referrers, or UTM values.
+      - Use boolean for conversion_flag.
+      - Use numeric(5,2) for purchase_intent_score.
+      - Avoid unsupported PostgreSQL features in MVP DDL such as partitioning, arrays, JSONB, generated columns, and custom enum types.
+      - Do not create a generic source_aggregate_row table.
+
+phase2_synthetic_data_requirements:
+  rows_per_table: 100
+  excel_output_required: true
+  postgres_load_required: true
+  data_safety: Synthetic/fake data only; no real personal data.
+  consistency_rules:
+    - Parent dimension rows must exist before fact rows.
+    - Fact foreign keys must reference valid generated dimension keys.
+    - All primary keys must be unique.
+    - Required columns must be populated.
+    - Generated varchar values must not exceed declared length.
+    - Excel data and PostgreSQL loaded data must be the same generated dataset.
+
+data_quality_rules:
+  - Each staging table must include source_file_name, reporting_period, load_batch_id, and load_created_at.
+  - Visitors and total must be non-negative integers.
+  - Synthetic session_id must be unique.
+  - Dimension natural keys must be deduplicated.
+  - Fact table foreign keys must be valid.
+  - Nulls are not allowed in required keys or required descriptors.
+  - Raw aggregate metrics must not be mixed with synthetic session grain without clear reporting logic.
+  - Phase 2 generated data must respect varchar length constraints.
+
+security_and_privacy:
+  contains_personal_data: false
+  privacy_notes:
+    - Use synthetic customer identifiers only.
+    - Do not generate real customer names, real emails, real phone numbers, or real addresses.
+    - Any customer profile data must be fake and clearly marked as synthetic.
+
+success_criteria:
+  - Phase 1 produces a complete PostgreSQL DDL section.
+  - Phase 2 extracts DDL successfully.
+  - Phase 2 dry run generates Excel with one sheet per table.
+  - Phase 2 generates exactly 100 records per table.
+  - Phase 2 validates primary keys and foreign keys.
+  - Phase 2 loads into PostgreSQL approved schema only.
+  - PostgreSQL row counts match generated Excel data.
+  - Reporting views can answer market entry, campaign, channel, vehicle interest, and funnel questions.
