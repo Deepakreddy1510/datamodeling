@@ -64,6 +64,12 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     lines.append("- Generated semantic types:")
     for semantic_type, count in sorted(stats.get('semantic_types', {}).items()):
         lines.append(f"  - {semantic_type}: {count}")
+    lines.extend(["", "## Reference Data Matching Summary", ""])
+    lines.extend([f"- {item}" for item in stats.get("reference_data_matches", [])] or ["- No YAML reference_data matches were applied."])
+    lines.extend(["", "## Entity Reuse Summary", ""])
+    lines.extend([f"- {item}" for item in stats.get("entity_reuse_events", [])] or ["- No cross-layer entity reuse events were needed."])
+    lines.extend(["", "## Relationship Generation Summary", ""])
+    lines.extend([f"- {item}" for item in stats.get("relationship_generation_events", [])] or ["- No parsed FK relationships were used."])
 
     lines.extend(["", "## DDL-Only Generation Strategy", ""])
     lines.append(f"- Columns generated using DDL/name inference: {len(stats.get('fallback_columns_used', []))}")
@@ -71,6 +77,8 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     lines.append(f"- FK-safe unique adjustments: {len(stats.get('fk_safe_unique_adjustments', []))}")
     lines.append(f"- Composite unique adjustments: {len(stats.get('composite_unique_adjustments', []))}")
     lines.append(f"- Placeholder warning count: {len(validation.get('placeholder_warnings', []))}")
+    lines.append(f"- Semantic placeholder validation status: {'failed' if validation.get('semantic_placeholder_errors') else 'passed'}")
+    lines.append(f"- Semantic placeholder checked values: {validation.get('semantic_placeholder_checked_values', 0)}")
     lines.append(f"- Calculation warning count: {len(stats.get('calculation_warnings', []))}")
     lines.extend([f"  - calculation warning: {item}" for item in stats.get("calculation_warnings", [])])
     lines.extend([f"  - fk-safe unique adjustment: {item}" for item in stats.get("fk_safe_unique_adjustments", [])])
@@ -106,7 +114,7 @@ def write_postgres_report(path, load_requested, result):
 def write_validation_report(path, pre_validation, post_validation=None):
     final_status = _overall_status(pre_validation.get("status"), post_validation.get("status") if post_validation else None)
     stats = pre_validation.get("generation_stats", {})
-    lines = ["# Validation Report", "", f"- Final status: **{final_status}**", f"- DDL validation status: **{'failed' if pre_validation.get('errors') else 'passed'}**", f"- Fallback inference count: {stats.get('fallback_to_ddl_inference_count', 0)}", f"- Semantic type count: {len(stats.get('semantic_types', {}))}", f"- Placeholder warning count: {len(pre_validation.get('placeholder_warnings', []))}", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
+    lines = ["# Validation Report", "", f"- Final status: **{final_status}**", f"- DDL validation status: **{'failed' if pre_validation.get('errors') else 'passed'}**", f"- Fallback inference count: {stats.get('fallback_to_ddl_inference_count', 0)}", f"- Semantic type count: {len(stats.get('semantic_types', {}))}", f"- Placeholder warning count: {len(pre_validation.get('placeholder_warnings', []))}", f"- Semantic placeholder validation status: **{'failed' if pre_validation.get('semantic_placeholder_errors') else 'passed'}**", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
     lines.extend([f"- {error}" for error in pre_validation.get("errors", [])] or ["- No validation errors."])
     lines.extend(["", "## FK Validation Coverage", "", "### Parsed FK Relationships", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("parsed_fk_relationships", [])] or ["- None"])
@@ -129,6 +137,9 @@ def write_validation_report(path, pre_validation, post_validation=None):
     lines.extend([f"- {item}" for item in pre_validation.get("boolean_rule_errors", [])] or ["- No boolean rule errors."])
     lines.extend(["", "## Placeholder Validation", ""])
     lines.extend([f"- {item}" for item in pre_validation.get("placeholder_warnings", [])] or ["- No placeholder warnings."])
+    lines.extend(["", "## Semantic Placeholder Validation", ""])
+    lines.append(f"- Checked values: {pre_validation.get('semantic_placeholder_checked_values', 0)}")
+    lines.extend([f"- {item}" for item in pre_validation.get("semantic_placeholder_errors", [])] or ["- No semantic placeholder errors."])
     lines.extend(["", "## Row Count Summary", "", "| Table | Rows |", "|---|---:|"])
     row_counts = pre_validation.get("row_count_summary", {})
     if row_counts:

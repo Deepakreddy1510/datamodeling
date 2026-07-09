@@ -202,3 +202,76 @@ CREATE TABLE fact_line (
         assert row["delivery_delay_minutes"] >= 0
         assert row["is_delayed"] == (row["delivery_delay_minutes"] > 0)
     assert validate_generated_data(model, data, 10)["status"] == "passed"
+
+
+def test_generic_semantic_generation_uses_reference_data_and_no_placeholders_for_football_style():
+    model = parse_ddl("""
+CREATE TABLE load_player_raw (
+  player_id varchar(30) PRIMARY KEY,
+  player_name varchar(80) NOT NULL,
+  position varchar(30),
+  jersey_number integer,
+  date_of_birth date,
+  nationality varchar(50),
+  active_status boolean
+);
+""")
+    business_input = {"reference_data": {"player_positions": ["Goalkeeper", "Defender", "Midfielder", "Forward"]}}
+    data = generate_synthetic_data(model, rows_per_table=8, seed=2, business_input=business_input)
+    positions = {row["position"] for row in data["load_player_raw"]}
+    assert positions <= set(business_input["reference_data"]["player_positions"])
+    for row in data["load_player_raw"]:
+        assert row["player_name"] != "Player 001"
+        assert " " in row["player_name"]
+        assert isinstance(row["date_of_birth"], date)
+        assert isinstance(row["jersey_number"], int)
+        assert isinstance(row["active_status"], bool)
+        assert not row["nationality"].endswith(" 001")
+    validation = validate_generated_data(model, data, 8, business_input=business_input)
+    assert validation["status"] == "passed"
+
+
+def test_generic_reference_data_payment_status_and_customer_email_consistency_across_layers():
+    model = parse_ddl("""
+CREATE TABLE load_customer_raw (customer_id varchar(30) PRIMARY KEY, customer_name varchar(80), email varchar(120), city varchar(50));
+CREATE TABLE stg_customer (customer_id varchar(30) PRIMARY KEY, customer_name varchar(80), email varchar(120), city varchar(50));
+CREATE TABLE dim_customer (customer_id varchar(30) PRIMARY KEY, customer_name varchar(80), email varchar(120), city varchar(50));
+CREATE TABLE fact_payment (
+  payment_id integer PRIMARY KEY,
+  customer_id varchar(30) REFERENCES dim_customer(customer_id),
+  payment_status varchar(30),
+  payment_amount numeric(10,2)
+);
+""")
+    business_input = {"reference_data": {"payment_statuses": ["Successful", "Failed", "Pending", "Refunded"]}}
+    data = generate_synthetic_data(model, rows_per_table=5, seed=3, business_input=business_input)
+    assert {row["payment_status"] for row in data["fact_payment"]} <= set(business_input["reference_data"]["payment_statuses"])
+    for i in range(5):
+        raw = data["load_customer_raw"][i]
+        stg = data["stg_customer"][i]
+        dim = data["dim_customer"][i]
+        assert raw["customer_name"] == stg["customer_name"] == dim["customer_name"]
+        assert raw["email"] == stg["email"] == dim["email"]
+        first, last = raw["customer_name"].split()[0].lower(), raw["customer_name"].split()[-1].lower()
+        assert first in raw["email"] and last in raw["email"]
+    assert validate_generated_data(model, data, 5, business_input=business_input)["status"] == "passed"
+
+
+def test_generic_semantic_styles_service_healthcare_banking_have_valid_types_and_fks():
+    model = parse_ddl("""
+CREATE TABLE dim_requester (requester_id varchar(30) PRIMARY KEY, requester_name varchar(80), email varchar(100));
+CREATE TABLE fact_ticket (ticket_id integer PRIMARY KEY, requester_id varchar(30) REFERENCES dim_requester(requester_id), ticket_priority varchar(20), created_at timestamp, resolved_flag boolean);
+CREATE TABLE dim_patient (patient_id varchar(30) PRIMARY KEY, patient_name varchar(80), date_of_birth date);
+CREATE TABLE fact_appointment (appointment_id integer PRIMARY KEY, patient_id varchar(30) REFERENCES dim_patient(patient_id), appointment_status varchar(20), appointment_date date);
+CREATE TABLE fact_transaction (transaction_id integer PRIMARY KEY, transaction_type varchar(20), transaction_amount numeric(12,2), transaction_date date, active_status boolean);
+""")
+    business_input = {"reference_data": {"ticket_priorities": ["Low", "Medium", "High"], "appointment_statuses": ["Scheduled", "Completed"], "transaction_types": ["Deposit", "Withdrawal"]}}
+    data = generate_synthetic_data(model, rows_per_table=6, seed=4, business_input=business_input)
+    assert {row["ticket_priority"] for row in data["fact_ticket"]} <= {"Low", "Medium", "High"}
+    assert {row["appointment_status"] for row in data["fact_appointment"]} <= {"Scheduled", "Completed"}
+    assert {row["transaction_type"] for row in data["fact_transaction"]} <= {"Deposit", "Withdrawal"}
+    for row in data["fact_transaction"]:
+        assert isinstance(row["transaction_amount"], Decimal)
+        assert isinstance(row["transaction_date"], date)
+        assert isinstance(row["active_status"], bool)
+    assert validate_generated_data(model, data, 6, business_input=business_input)["status"] == "passed"

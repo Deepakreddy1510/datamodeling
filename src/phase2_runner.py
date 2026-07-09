@@ -65,7 +65,7 @@ def main():
         model = parse_ddl(ddl_text)
         semantic_context = build_semantic_context(business_input, model)
         data = generate_synthetic_data(model, args.rows_per_table, args.seed, semantic_context=semantic_context)
-        pre_validation = validate_generated_data(model, data, args.rows_per_table)
+        pre_validation = validate_generated_data(model, data, args.rows_per_table, semantic_context=semantic_context, business_input=business_input)
         pre_validation["generation_stats"] = data.get("__stats__", {})
         pre_validation["excel_written"] = False
         if pre_validation["status"] == "failed":

@@ -41,6 +41,7 @@ except ImportError:  # pragma: no cover - exercised when optional dependency is 
             return " ".join(self.word() for _ in range(nb_words)).capitalize() + "."
 
 from .semantic_context import build_semantic_context
+from .reference_data_resolver import ReferenceDataResolver
 
 
 class SyntheticDataError(Exception):
@@ -279,7 +280,7 @@ def normalize_value_for_column(value, column, stats=None):
             return True
         if normalized in {"false", "no", "0", "n"}:
             return False
-        return bool(value)
+        return _type_compatible_fallback(column, stats, value, "boolean conversion failed")
     if dtype.startswith("date"):
         if isinstance(value, date) and not isinstance(value, datetime):
             return value
@@ -547,6 +548,37 @@ def _generic_label(prefix, index):
     return f"{prefix} {index:03d}"
 
 
+def _entity_base(table_name):
+    return re.sub(r"^(load_|stg_|dim_|fact_)", "", table_name.lower()).replace("_raw", "")
+
+
+def _shared_entity_key(table_name):
+    base = _entity_base(table_name)
+    parts = [part for part in base.split("_") if part not in {"raw", "fact"}]
+    return parts[-1] if parts else base
+
+
+def _reuse_entity_values(table, row, index, entity_store, stats):
+    """Reuse same-named business attributes across load/stg/dim layers."""
+    base = _shared_entity_key(table.name)
+    reusable_names = {
+        column.name for column in table.columns
+        if not column.is_primary_key and not column.name.lower().endswith(("_key", "_id"))
+    }
+    if not reusable_names:
+        return
+    stored = entity_store.setdefault(base, {})
+    row_store = stored.setdefault(index, {})
+    reused = 0
+    for name in reusable_names:
+        if name in row_store:
+            row[name] = row_store[name]
+            reused += 1
+        elif name in row:
+            row_store[name] = row[name]
+    if reused:
+        stats.setdefault("entity_reuse_events", set()).add(f"{table.name}:{base}:{reused}")
+
 
 def _context_phrase(semantic_context, fallback="Item"):
     terms = []
@@ -587,13 +619,37 @@ def _apply_semantic_consistency(table, row, index, stats):
         row["payment_date"] = order_like
 
 
-def _fallback_value(fake, rng, table, column, index, stats, semantic_context=None):
+def _fallback_value(fake, rng, table, column, index, stats, semantic_context=None, reference_resolver=None):
     name = column.name.lower()
     dtype = column.data_type.lower()
     table_base = table.name.replace("dim_", "").replace("fact_", "").replace("stg_", "").replace("load_", "").replace("_raw", "")
     title = table_base.replace("_", " ").title() or "Item"
     semantic_type = _semantic_type_for(semantic_context, table, column)
     context_label = _context_phrase(semantic_context, title)
+
+    # DDL data types win before semantic or reference-data generation.
+    if "bool" in dtype:
+        return index % 2 == 0
+    if dtype.startswith("date"):
+        if semantic_type == "birth_date" or "birth" in name:
+            return date(1970 + (index % 35), ((index - 1) % 12) + 1, ((index - 1) % 28) + 1)
+        return SYNTHETIC_BASE_DATE - timedelta(days=rng.randint(0, 730))
+    if dtype.startswith("time") and "timestamp" not in dtype:
+        return dt_time(index % 23, index % 59, 0)
+    if "timestamp" in dtype or "timestamptz" in dtype:
+        return datetime.combine(SYNTHETIC_BASE_DATE, dt_time(index % 23, index % 59, 0)) - timedelta(days=rng.randint(0, 730))
+    if _is_integer_type(column):
+        if any(word in name for word in ["quantity", "count", "number", "score", "rank"]):
+            return rng.randint(1, 25)
+        return rng.randint(1, 1000)
+    if _is_numeric_type(column):
+        return _numeric_value(rng, column, stats, 0, 100 if any(word in name for word in ["rate", "percentage", "ratio", "score"]) else None)
+
+    if reference_resolver is not None and any(token in dtype for token in ["char", "text"]) and semantic_type in {"status", "category", "type", "method", "role", "position", "priority", "country", "nationality"}:
+        reference_values, reference_key = reference_resolver.resolve(table.name, column.name, semantic_type)
+        if reference_values:
+            stats.setdefault("reference_data_matches", set()).add(f"{table.name}.{column.name} -> {reference_key}")
+            return _cycle(reference_values, index, column, stats)
 
     if semantic_type == "json" or _is_json_type(column):
         return {"generated": True, "row_number": index, "source": "synthetic", "semantic": table_base}
@@ -617,7 +673,7 @@ def _fallback_value(fake, rng, table, column, index, stats, semantic_context=Non
         return _bounded(fake.first_name(), column, stats)
     if "last_name" in name:
         return _bounded(fake.last_name(), column, stats)
-    if semantic_type == "product_or_service" or any(token in name for token in ["product_name", "service_name", "item_name"]):
+    if semantic_type in {"product_name", "service_name"} or any(token in name for token in ["product_name", "service_name", "item_name"]):
         return _bounded(f"{context_label} {fake.word().title()} {index:03d}", column, stats)
     if any(token in name for token in ["store_name", "branch_name", "location_name", "company_name", "organization_name"]):
         return _bounded(f"{context_label} {fake.city()} {title} {index:03d}", column, stats)
@@ -627,25 +683,19 @@ def _fallback_value(fake, rng, table, column, index, stats, semantic_context=Non
         return _cycle(GENERIC_SEGMENTS, index, column, stats)
     if semantic_type == "method" or "method" in name:
         return _cycle(GENERIC_METHODS, index, column, stats)
+    if semantic_type in {"role", "position"} or name in {"role", "position"} or name.endswith(("_role", "_position")):
+        return _cycle(["Lead", "Associate", "Specialist", "Coordinator", "Manager"], index, column, stats)
+    if semantic_type == "nationality" or "nationality" in name:
+        return _bounded(fake.country(), column, stats)
     if semantic_type == "category" or "category" in name or name.endswith("type") or name == "type":
         return _bounded(f"{context_label} {GENERIC_TYPES[(index - 1) % len(GENERIC_TYPES)]}", column, stats)
-    if "date" in dtype or name.endswith("date"):
-        return date.today() - timedelta(days=rng.randint(0, 730))
-    if dtype.startswith("time") and "timestamp" not in dtype:
-        return dt_time(index % 23, index % 59, 0)
-    if "timestamp" in dtype or "timestamptz" in dtype or "time" in name:
-        return datetime.now().replace(microsecond=0) - timedelta(days=rng.randint(0, 730), seconds=rng.randint(0, 86400))
-    if "bool" in dtype or name.startswith("is_") or name.endswith("flag"):
+    if "time" in name:
+        return datetime.combine(SYNTHETIC_BASE_DATE, dt_time(index % 23, index % 59, 0)) - timedelta(days=rng.randint(0, 730))
+    if name.startswith("is_") or name.endswith("flag"):
         return index % 2 == 0
-    if any(token in dtype for token in ["int", "serial"]):
-        return rng.randint(1, 1000)
-    if _is_numeric_type(column):
-        return _numeric_value(rng, column, stats)
-    if any(token in dtype for token in ["char", "text"]):
-        return _bounded(_generic_label(title, index), column, stats)
-    if any(word in name for word in ["amount", "price", "cost", "total", "rate", "score", "percentage", "ratio", "value"]):
+    if not any(token in dtype for token in ["char", "text"]) and any(word in name for word in ["amount", "price", "cost", "total", "rate", "score", "percentage", "ratio", "value"]):
         return _numeric_value(rng, column, stats, 0, 100 if any(word in name for word in ["rate", "percentage", "ratio", "score"]) else None)
-    if any(word in name for word in ["quantity", "count", "number"]):
+    if not any(token in dtype for token in ["char", "text"]) and any(word in name for word in ["quantity", "count", "number"]):
         return rng.randint(1, 25)
     if "uuid" in dtype:
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{table.name}.{column.name}.{index}"))
@@ -654,7 +704,11 @@ def _fallback_value(fake, rng, table, column, index, stats, semantic_context=Non
     if any(word in name for word in ["description", "comment", "notes"]):
         return _bounded(fake.sentence(nb_words=8), column, stats)
     if "name" in name:
-        return _bounded(_generic_label(title, index), column, stats)
+        if any(token in name for token in ["company", "organization", "organisation", "product", "service", "item"]):
+            return _bounded(f"{context_label} {fake.word().title()} {index:03d}", column, stats)
+        return _bounded(fake.name(), column, stats)
+    if any(token in dtype for token in ["char", "text"]):
+        return _bounded(f"Synthetic {context_label} {fake.word().title()} {index:03d}", column, stats)
     stats["generic_fallback_values"] += 1
     return _bounded(f"Synthetic {context_label} {index:03d}", column, stats)
 
@@ -717,6 +771,8 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
     table_map = model.table_map()
     if semantic_context is None:
         semantic_context = build_semantic_context(business_input or {}, model)
+    reference_resolver = ReferenceDataResolver(business_input or {})
+    entity_store = {}
     stats = {
         "truncated_values": 0,
         "numeric_bounded_values": 0,
@@ -733,6 +789,9 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
         "type_normalization_warnings": [],
         "semantic_types": {},
         "semantic_context_terms": list(getattr(semantic_context, "domain_terms", [])[:10]),
+        "reference_data_matches": set(),
+        "entity_reuse_events": set(),
+        "relationship_generation_events": set(),
     }
     for semantic in getattr(semantic_context, "column_semantics", {}).values():
         stats["semantic_types"].setdefault(semantic.semantic_type, 0)
@@ -755,7 +814,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
                 if value is None:
                     stats["fallback_columns_used"].add(f"{table.name}.{column.name}")
                     stats["fallback_to_ddl_inference_count"] += 1
-                    value = _fallback_value(fake, rng, table, column, index, stats, semantic_context)
+                    value = _fallback_value(fake, rng, table, column, index, stats, semantic_context, reference_resolver)
                 row[column.name] = value
             for fk in table.foreign_keys:
                 parent = table_map[fk.parent_table.lower()]
@@ -763,6 +822,8 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
                 parent_row = parent_rows[(index - 1) % len(parent_rows)]
                 for child_col, parent_col in zip(fk.child_columns, fk.parent_columns):
                     row[child_col] = parent_row[parent_col]
+                    stats.setdefault("relationship_generation_events", set()).add(f"{table.name}.{child_col} -> {parent.name}.{parent_col}")
+            _reuse_entity_values(table, row, index, entity_store, stats)
             _apply_semantic_consistency(table, row, index, stats)
             _apply_lifecycle_order(row)
             _enforce_primary_key(table, row, seen_primary_keys, index, stats)
@@ -775,5 +836,8 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
     stats["fk_safe_unique_adjustments"] = sorted(stats["fk_safe_unique_adjustments"])
     stats["composite_unique_adjustments"] = sorted(stats["composite_unique_adjustments"])
     stats["primary_key_repairs"] = sorted(stats["primary_key_repairs"])
+    stats["reference_data_matches"] = sorted(stats["reference_data_matches"])
+    stats["entity_reuse_events"] = sorted(stats["entity_reuse_events"])
+    stats["relationship_generation_events"] = sorted(stats["relationship_generation_events"])
     generated["__stats__"] = stats
     return generated
