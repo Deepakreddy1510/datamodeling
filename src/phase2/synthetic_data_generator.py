@@ -236,9 +236,12 @@ def _type_compatible_fallback(column, stats=None, value=None, reason="conversion
 
 def _check_constraint_value(table, column, index, stats):
     for check in getattr(table, "check_constraints", []):
-        if not getattr(check, "supported", False) or check.column != column.name:
+        check_column = str(getattr(check, "column", "") or "").strip().strip('"').lower()
+        column_name = column.name.strip().strip('"').lower()
+        if not getattr(check, "supported", False) or check_column != column_name:
             continue
         if check.operator == "IN" and check.values:
+            stats.setdefault("check_in_value_sources", set()).add(f"{table.name}.{column.name}")
             return normalize_value_for_column(_cycle(check.values, index, column, stats), column, stats)
         if check.operator == "BETWEEN":
             return normalize_value_for_column(check.min_value, column, stats)
@@ -792,6 +795,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
         "reference_data_matches": set(),
         "entity_reuse_events": set(),
         "relationship_generation_events": set(),
+        "check_in_value_sources": set(),
     }
     for semantic in getattr(semantic_context, "column_semantics", {}).values():
         stats["semantic_types"].setdefault(semantic.semantic_type, 0)
@@ -839,5 +843,6 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
     stats["reference_data_matches"] = sorted(stats["reference_data_matches"])
     stats["entity_reuse_events"] = sorted(stats["entity_reuse_events"])
     stats["relationship_generation_events"] = sorted(stats["relationship_generation_events"])
+    stats["check_in_value_sources"] = sorted(stats["check_in_value_sources"])
     generated["__stats__"] = stats
     return generated

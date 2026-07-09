@@ -275,3 +275,58 @@ CREATE TABLE fact_transaction (transaction_id integer PRIMARY KEY, transaction_t
         assert isinstance(row["transaction_date"], date)
         assert isinstance(row["active_status"], bool)
     assert validate_generated_data(model, data, 6, business_input=business_input)["status"] == "passed"
+
+
+def test_check_in_constraints_override_reference_data_for_text_enums_generically():
+    model = parse_ddl("""
+CREATE TABLE enum_values (
+  id integer PRIMARY KEY,
+  status varchar(20) CHECK (status IN ('DDL_A','DDL_B')),
+  platform_type text CHECK (platform_type IN ('Web','Mobile','Partner')),
+  ticket_category varchar(20) CHECK (ticket_category IN ('Standard','Premium'))
+);
+""")
+    business_input = {"reference_data": {"statuses": ["Yaml A", "Yaml B"], "platform_types": ["Yaml Platform"]}}
+    data = generate_synthetic_data(model, rows_per_table=6, seed=5, business_input=business_input)
+    assert {row["status"] for row in data["enum_values"]} <= {"DDL_A", "DDL_B"}
+    assert {row["platform_type"] for row in data["enum_values"]} <= {"Web", "Mobile", "Partner"}
+    assert {row["ticket_category"] for row in data["enum_values"]} <= {"Standard", "Premium"}
+    assert set(data["__stats__"]["check_in_value_sources"]) == {
+        "enum_values.platform_type",
+        "enum_values.status",
+        "enum_values.ticket_category",
+    }
+    assert validate_generated_data(model, data, 6, business_input=business_input)["status"] == "passed"
+
+
+def test_football_style_check_in_columns_are_generated_from_ddl_allowed_values():
+    model = parse_ddl("""
+CREATE TABLE stg_team (
+  team_id integer PRIMARY KEY,
+  confederation varchar(20) CHECK (confederation IN ('AFC','CAF','CONCACAF','CONMEBOL','OFC','UEFA'))
+);
+CREATE TABLE stg_player (
+  player_id integer PRIMARY KEY,
+  position varchar(20) CHECK (position IN ('Goalkeeper','Defender','Midfielder','Forward')),
+  preferred_foot varchar(10) CHECK (preferred_foot IN ('Left','Right','Both'))
+);
+CREATE TABLE stg_match (
+  match_id integer PRIMARY KEY,
+  match_stage varchar(30) CHECK (match_stage IN ('Group Stage','Round of 16','Quarter Final','Semi Final','Third Place Playoff','Final')),
+  match_status varchar(20) CHECK (match_status IN ('Scheduled','In Progress','Completed','Postponed','Cancelled'))
+);
+CREATE TABLE stg_match_event (
+  event_id integer PRIMARY KEY,
+  event_type varchar(20) CHECK (event_type IN ('Goal','Assist','Yellow Card','Red Card','Substitution','Penalty','Own Goal','Save')),
+  event_outcome varchar(20) CHECK (event_outcome IN ('Successful','Unsuccessful','Awarded','Missed','Completed'))
+);
+""")
+    data = generate_synthetic_data(model, rows_per_table=20, seed=6, business_input={"reference_data": {"positions": ["Yaml Position"]}})
+    assert {row["confederation"] for row in data["stg_team"]} <= {'AFC','CAF','CONCACAF','CONMEBOL','OFC','UEFA'}
+    assert {row["position"] for row in data["stg_player"]} <= {'Goalkeeper','Defender','Midfielder','Forward'}
+    assert {row["preferred_foot"] for row in data["stg_player"]} <= {'Left','Right','Both'}
+    assert {row["match_stage"] for row in data["stg_match"]} <= {'Group Stage','Round of 16','Quarter Final','Semi Final','Third Place Playoff','Final'}
+    assert {row["match_status"] for row in data["stg_match"]} <= {'Scheduled','In Progress','Completed','Postponed','Cancelled'}
+    assert {row["event_type"] for row in data["stg_match_event"]} <= {'Goal','Assist','Yellow Card','Red Card','Substitution','Penalty','Own Goal','Save'}
+    assert {row["event_outcome"] for row in data["stg_match_event"]} <= {'Successful','Unsuccessful','Awarded','Missed','Completed'}
+    assert validate_generated_data(model, data, 20)["status"] == "passed"

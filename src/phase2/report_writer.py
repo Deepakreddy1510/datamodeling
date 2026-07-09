@@ -51,6 +51,8 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     lines.extend(["", "## Numeric Precision / Scale Rules", ""])
     lines.extend([f"- {item}" for item in validation.get("numeric_checks", [])] or ["- No numeric precision/scale limits parsed."])
     lines.append(f"- Numeric bounded value count: {stats.get('numeric_bounded_values', 0)}")
+    lines.extend(["", "## CHECK IN Value Source Summary", ""])
+    lines.extend([f"- {item}" for item in stats.get("check_in_value_sources", [])] or ["- No CHECK IN constrained columns generated in this run."])
 
     lines.extend(["", "## Foreign Key Relationships", "", "### Parsed", ""])
     lines.extend([f"- {item}" for item in validation.get("parsed_fk_relationships", [])] or ["- None"])
@@ -73,6 +75,7 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
 
     lines.extend(["", "## DDL-Only Generation Strategy", ""])
     lines.append(f"- Columns generated using DDL/name inference: {len(stats.get('fallback_columns_used', []))}")
+    lines.append(f"- Columns generated from CHECK IN allowed values: {len(stats.get('check_in_value_sources', []))}")
     lines.append(f"- Fallback-to-DDL inference count: {stats.get('fallback_to_ddl_inference_count', 0)}")
     lines.append(f"- FK-safe unique adjustments: {len(stats.get('fk_safe_unique_adjustments', []))}")
     lines.append(f"- Composite unique adjustments: {len(stats.get('composite_unique_adjustments', []))}")
