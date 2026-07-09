@@ -330,3 +330,119 @@ CREATE TABLE stg_match_event (
     assert {row["event_type"] for row in data["stg_match_event"]} <= {'Goal','Assist','Yellow Card','Red Card','Substitution','Penalty','Own Goal','Save'}
     assert {row["event_outcome"] for row in data["stg_match_event"]} <= {'Successful','Unsuccessful','Awarded','Missed','Completed'}
     assert validate_generated_data(model, data, 20)["status"] == "passed"
+
+
+def test_finalize_generated_value_enforces_ddl_types_and_varchar_length_for_bad_candidates():
+    model = parse_ddl("""
+CREATE TABLE guard_values (
+  id integer PRIMARY KEY,
+  int_value integer,
+  big_value bigint,
+  amount numeric(10,2),
+  event_date date,
+  event_timestamp timestamp,
+  active_status boolean,
+  short_label varchar(10)
+);
+""")
+    table = model.tables[0]
+    from phase2.synthetic_data_generator import finalize_generated_value
+    stats = {"truncated_values": 0}
+    bad = "Synthetic Global Football Value 001"
+    row = {}
+    for column in table.columns:
+        if column.name == "id":
+            continue
+        row[column.name] = finalize_generated_value(table, column, bad, 1, row, stats)
+    assert isinstance(row["int_value"], int)
+    assert isinstance(row["big_value"], int)
+    assert isinstance(row["amount"], Decimal)
+    assert isinstance(row["event_date"], date) and not isinstance(row["event_date"], datetime)
+    assert isinstance(row["event_timestamp"], datetime)
+    assert isinstance(row["active_status"], bool)
+    assert len(row["short_label"]) <= 10
+
+
+def test_entity_reuse_is_finalized_against_target_ddl_type():
+    model = parse_ddl("""
+CREATE TABLE load_metric_raw (metric_id integer PRIMARY KEY, metric_value text, metric_date text, metric_amount text);
+CREATE TABLE stg_metric (metric_id integer PRIMARY KEY, metric_value integer, metric_date date, metric_amount numeric(8,2));
+""")
+    data = generate_synthetic_data(model, rows_per_table=3, seed=7)
+    for row in data["stg_metric"]:
+        assert isinstance(row["metric_value"], int)
+        assert isinstance(row["metric_date"], date) and not isinstance(row["metric_date"], datetime)
+        assert isinstance(row["metric_amount"], Decimal)
+    assert set(data["__stats__"]["incompatible_reuse_corrections"]) >= {"stg_metric.metric_value", "stg_metric.metric_date", "stg_metric.metric_amount"}
+    assert validate_generated_data(model, data, 3)["status"] == "passed"
+
+
+def test_between_and_positive_constraints_are_enforced_by_final_guard():
+    model = parse_ddl("""
+CREATE TABLE constrained_numbers (
+  id integer PRIMARY KEY,
+  jersey_number integer CHECK (jersey_number BETWEEN 1 AND 99),
+  minutes_played integer CHECK (minutes_played BETWEEN 0 AND 120),
+  nonnegative_amount numeric(10,2) CHECK (nonnegative_amount >= 0),
+  positive_amount numeric(10,2) CHECK (positive_amount > 0)
+);
+""")
+    data = generate_synthetic_data(model, rows_per_table=20, seed=8)
+    for row in data["constrained_numbers"]:
+        assert 1 <= row["jersey_number"] <= 99
+        assert 0 <= row["minutes_played"] <= 120
+        assert row["nonnegative_amount"] >= 0
+        assert row["positive_amount"] > 0
+    assert validate_generated_data(model, data, 20)["status"] == "passed"
+
+
+def test_football_style_typed_columns_pass_validation_without_text_leaks():
+    model = parse_ddl("""
+CREATE TABLE typed_sports_regression (
+  id integer PRIMARY KEY,
+  season_year integer CHECK (season_year BETWEEN 2024 AND 2026),
+  start_date date,
+  end_date date,
+  team_rank integer CHECK (team_rank > 0),
+  jersey_number integer CHECK (jersey_number BETWEEN 1 AND 99),
+  date_of_birth date,
+  match_date date,
+  home_score integer CHECK (home_score >= 0),
+  away_score integer CHECK (away_score >= 0),
+  attendance_count integer CHECK (attendance_count >= 0),
+  match_revenue numeric(14,2) CHECK (match_revenue >= 0),
+  minutes_played integer CHECK (minutes_played BETWEEN 0 AND 120),
+  event_time_minute integer CHECK (event_time_minute BETWEEN 0 AND 120),
+  tickets_sold integer CHECK (tickets_sold >= 0),
+  ticket_price numeric(10,2) CHECK (ticket_price >= 0),
+  sale_amount numeric(14,2) CHECK (sale_amount >= 0),
+  sale_date date,
+  viewers_count bigint CHECK (viewers_count > 0),
+  broadcast_revenue numeric(14,2) CHECK (broadcast_revenue > 0),
+  contract_amount numeric(14,2) CHECK (contract_amount > 0),
+  confederation varchar(20) CHECK (confederation IN ('AFC','CAF','CONCACAF','CONMEBOL','OFC','UEFA')),
+  position varchar(30) CHECK (position IN ('Goalkeeper','Defender','Midfielder','Forward')),
+  preferred_foot varchar(10) CHECK (preferred_foot IN ('Left','Right','Both')),
+  match_stage varchar(50) CHECK (match_stage IN ('Group Stage','Round of 16','Quarter Final','Semi Final','Third Place Playoff','Final')),
+  match_status varchar(30) CHECK (match_status IN ('Scheduled','In Progress','Completed','Postponed','Cancelled')),
+  event_type varchar(30) CHECK (event_type IN ('Goal','Assist','Yellow Card','Red Card','Substitution','Penalty','Own Goal','Save')),
+  event_outcome varchar(30) CHECK (event_outcome IN ('Successful','Unsuccessful','Awarded','Missed','Completed'))
+);
+""")
+    data = generate_synthetic_data(model, rows_per_table=20, seed=9)
+    for row in data["typed_sports_regression"]:
+        assert isinstance(row["season_year"], int) and 2024 <= row["season_year"] <= 2026
+        assert isinstance(row["start_date"], date) and isinstance(row["end_date"], date)
+        assert isinstance(row["jersey_number"], int) and 1 <= row["jersey_number"] <= 99
+        assert isinstance(row["date_of_birth"], date)
+        assert isinstance(row["match_date"], date)
+        assert isinstance(row["home_score"], int) and row["home_score"] >= 0
+        assert isinstance(row["away_score"], int) and row["away_score"] >= 0
+        assert isinstance(row["sale_amount"], Decimal)
+        assert row["confederation"] in {'AFC','CAF','CONCACAF','CONMEBOL','OFC','UEFA'}
+        assert row["position"] in {'Goalkeeper','Defender','Midfielder','Forward'}
+        assert row["preferred_foot"] in {'Left','Right','Both'}
+        for value in row.values():
+            if isinstance(value, str):
+                assert not value.startswith("Synthetic Global Football")
+    assert validate_generated_data(model, data, 20)["status"] == "passed"

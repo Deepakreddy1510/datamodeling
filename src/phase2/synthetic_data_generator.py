@@ -256,6 +256,118 @@ def _check_constraint_value(table, column, index, stats):
     return None
 
 
+def _column_checks(table, column):
+    column_name = column.name.strip().strip('"').lower()
+    return [
+        check for check in getattr(table, "check_constraints", [])
+        if getattr(check, "supported", False)
+        and str(getattr(check, "column", "") or "").strip().strip('"').lower() == column_name
+    ]
+
+
+def _first_check_in_values(table, column):
+    for check in _column_checks(table, column):
+        if check.operator == "IN" and check.values:
+            return check.values
+    return []
+
+
+def _constraint_floor(check):
+    if check.operator == ">":
+        return Decimal(str(check.min_value)) + Decimal("1")
+    if check.operator == ">=":
+        return Decimal(str(check.min_value))
+    return None
+
+
+def _constraint_ceiling(check):
+    if check.operator == "<":
+        return Decimal(str(check.min_value)) - Decimal("1")
+    if check.operator == "<=":
+        return Decimal(str(check.min_value))
+    return None
+
+
+def _constraint_compatible_value(column, checks, index, stats):
+    between = next((check for check in checks if check.operator == "BETWEEN"), None)
+    if between:
+        min_value = Decimal(str(between.min_value))
+        max_value = Decimal(str(between.max_value))
+        span = max_value - min_value
+        value = min_value if span <= 0 else min_value + Decimal((index - 1) % (int(span) + 1))
+        return normalize_value_for_column(value, column, stats)
+
+    floors = [floor for floor in (_constraint_floor(check) for check in checks) if floor is not None]
+    ceilings = [ceiling for ceiling in (_constraint_ceiling(check) for check in checks) if ceiling is not None]
+    if floors or ceilings:
+        floor = max(floors) if floors else Decimal("0")
+        ceiling = min(ceilings) if ceilings else floor + Decimal("100")
+        if ceiling < floor:
+            ceiling = floor
+        return normalize_value_for_column(floor, column, stats)
+    return None
+
+
+def _satisfies_numeric_constraints(value, checks):
+    decimal_value = _to_decimal(value)
+    if decimal_value is None:
+        return False
+    for check in checks:
+        if check.operator == "BETWEEN":
+            if not (Decimal(str(check.min_value)) <= decimal_value <= Decimal(str(check.max_value))):
+                return False
+        elif check.operator == ">":
+            if not decimal_value > Decimal(str(check.min_value)):
+                return False
+        elif check.operator == ">=":
+            if not decimal_value >= Decimal(str(check.min_value)):
+                return False
+        elif check.operator == "<":
+            if not decimal_value < Decimal(str(check.min_value)):
+                return False
+        elif check.operator == "<=":
+            if not decimal_value <= Decimal(str(check.min_value)):
+                return False
+    return True
+
+
+def finalize_generated_value(table, column, value, row_index, row_context, stats):
+    """Central DDL guard for every generated cell before it is stored."""
+    original = value
+    checks = _column_checks(table, column)
+    check_in_values = _first_check_in_values(table, column)
+    if check_in_values:
+        if str(value) not in {str(item) for item in check_in_values}:
+            stats.setdefault("check_in_value_sources", set()).add(f"{table.name}.{column.name}")
+            value = _cycle(check_in_values, row_index, column, stats)
+        value = normalize_value_for_column(value, column, stats)
+    else:
+        normalized = normalize_value_for_column(value, column, stats)
+        if normalized != original:
+            stats.setdefault("ddl_type_corrections", set()).add(f"{table.name}.{column.name}")
+        value = normalized
+
+    constraint_value = _constraint_compatible_value(column, checks, row_index, stats)
+    if constraint_value is not None and not _satisfies_numeric_constraints(value, checks):
+        stats.setdefault("ddl_type_corrections", set()).add(f"{table.name}.{column.name}")
+        value = constraint_value
+
+    name = column.name.lower()
+    if isinstance(value, date) and not isinstance(value, datetime) and "end" in name:
+        start_value = next(
+            (candidate for key, candidate in row_context.items() if "start" in key.lower() and isinstance(candidate, date) and not isinstance(candidate, datetime)),
+            None,
+        )
+        if start_value and value < start_value:
+            value = start_value + timedelta(days=row_index % 30)
+            stats.setdefault("date_rule_corrections", set()).add(f"{table.name}.{column.name}")
+
+    if isinstance(value, str) and column.max_length and len(value) > column.max_length:
+        stats.setdefault("varchar_length_corrections", set()).add(f"{table.name}.{column.name}")
+        value = _bounded(value, column, stats)
+    return value
+
+
 def normalize_value_for_column(value, column, stats=None):
     dtype = column.data_type.lower()
     if value is None:
@@ -575,7 +687,11 @@ def _reuse_entity_values(table, row, index, entity_store, stats):
     reused = 0
     for name in reusable_names:
         if name in row_store:
-            row[name] = row_store[name]
+            original = row_store[name]
+            column = next((candidate for candidate in table.columns if candidate.name == name), None)
+            row[name] = finalize_generated_value(table, column, original, index, row, stats) if column else original
+            if row[name] != original:
+                stats.setdefault("incompatible_reuse_corrections", set()).add(f"{table.name}.{name}")
             reused += 1
         elif name in row:
             row_store[name] = row[name]
@@ -615,7 +731,7 @@ def _apply_semantic_consistency(table, row, index, stats):
     for column in table.columns:
         name = column.name.lower()
         if "email" in name and first and last:
-            row[column.name] = _short_email(index, column, stats, first, last)
+            row[column.name] = finalize_generated_value(table, column, _short_email(index, column, stats, first, last), index, row, stats)
     order_like = row.get("order_date") or row.get("created_at")
     payment_like = row.get("payment_date")
     if isinstance(order_like, date) and isinstance(payment_like, date) and payment_like < order_like:
@@ -726,8 +842,12 @@ def _to_decimal(value):
 def _infer_calculated_value(row, column):
     name = column.name.lower()
     quantity = _to_decimal(row.get("quantity"))
+    if quantity is None:
+        quantity = next((_to_decimal(value) for key, value in row.items() if any(token in key.lower() for token in ["quantity", "count", "sold"]) and _to_decimal(value) is not None), None)
     unit_price = _to_decimal(row.get("unit_price"))
     price = _to_decimal(row.get("price"))
+    if price is None:
+        price = next((_to_decimal(value) for key, value in row.items() if "price" in key.lower() and _to_decimal(value) is not None), None)
     cost = _to_decimal(row.get("cost"))
     revenue = _to_decimal(row.get("revenue"))
 
@@ -755,15 +875,21 @@ def _infer_calculated_value(row, column):
 
 def _finalize_calculations(model, generated, stats):
     for table in model.tables:
-        for row in generated.get(table.name, []):
+        for row_index, row in enumerate(generated.get(table.name, []), start=1):
             for column in table.columns:
                 value = _infer_calculated_value(row, column)
                 if value is not None:
                     if column.numeric_precision is not None or column.numeric_scale is not None:
                         scale = column.numeric_scale or 0
                         value = Decimal(value).quantize(Decimal(1).scaleb(-scale) if scale else Decimal(1))
-                    row[column.name] = _bounded(value, column, stats)
+                    row[column.name] = finalize_generated_value(table, column, _bounded(value, column, stats), row_index, row, stats)
+                    stats.setdefault("calculation_corrections", set()).add(f"{table.name}.{column.name}")
                     stats["calculated_columns"].add(f"{table.name}.{column.name}")
+
+
+def _finalize_row_values(table, row, index, stats):
+    for column in table.columns:
+        row[column.name] = finalize_generated_value(table, column, row.get(column.name), index, row, stats)
 
 
 def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_context=None, business_input=None):
@@ -796,6 +922,11 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
         "entity_reuse_events": set(),
         "relationship_generation_events": set(),
         "check_in_value_sources": set(),
+        "ddl_type_corrections": set(),
+        "varchar_length_corrections": set(),
+        "incompatible_reuse_corrections": set(),
+        "calculation_corrections": set(),
+        "date_rule_corrections": set(),
     }
     for semantic in getattr(semantic_context, "column_semantics", {}).values():
         stats["semantic_types"].setdefault(semantic.semantic_type, 0)
@@ -830,8 +961,10 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
             _reuse_entity_values(table, row, index, entity_store, stats)
             _apply_semantic_consistency(table, row, index, stats)
             _apply_lifecycle_order(row)
+            _finalize_row_values(table, row, index, stats)
             _enforce_primary_key(table, row, seen_primary_keys, index, stats)
             _enforce_unique_constraints(table, row, seen_unique, index, stats, generated)
+            _finalize_row_values(table, row, index, stats)
             rows.append(row)
         generated[table.name] = rows
     _finalize_calculations(model, generated, stats)
@@ -844,5 +977,10 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
     stats["entity_reuse_events"] = sorted(stats["entity_reuse_events"])
     stats["relationship_generation_events"] = sorted(stats["relationship_generation_events"])
     stats["check_in_value_sources"] = sorted(stats["check_in_value_sources"])
+    stats["ddl_type_corrections"] = sorted(stats["ddl_type_corrections"])
+    stats["varchar_length_corrections"] = sorted(stats["varchar_length_corrections"])
+    stats["incompatible_reuse_corrections"] = sorted(stats["incompatible_reuse_corrections"])
+    stats["calculation_corrections"] = sorted(stats["calculation_corrections"])
+    stats["date_rule_corrections"] = sorted(stats["date_rule_corrections"])
     generated["__stats__"] = stats
     return generated
