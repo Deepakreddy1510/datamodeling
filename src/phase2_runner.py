@@ -4,6 +4,7 @@ from pathlib import Path
 
 from phase2.ddl_extractor import DDLExtractionError, extract_ddl
 from phase2.ddl_parser import DDLParserError, parse_ddl
+from phase2.codex_cli_data_generator import CodexCliDataGenerator, CodexCliGenerationError
 from phase2.excel_writer import write_excel
 from phase2.postgres_loader import load_to_postgres, validate_postgres_load
 from phase2.report_writer import write_generation_report, write_postgres_report, write_validation_report
@@ -28,6 +29,9 @@ def parse_args():
     parser.add_argument("--truncate-before-load", action="store_true", help="Truncate target tables before loading.")
     parser.add_argument("--allow-insert-into-nonempty-tables", action="store_true", help="Allow inserts into non-empty target tables.")
     parser.add_argument("--seed", type=int, default=12345, help="Deterministic fake data seed.")
+    parser.add_argument("--generation-engine", choices=["python", "codex-cli"], default="python", help="Synthetic data engine. Default: python.")
+    parser.add_argument("--allow-generator-fallback", action="store_true", help="Fall back to the Python generator if the experimental Codex CLI generator fails.")
+    parser.add_argument("--codex-timeout-seconds", type=int, default=300, help="Timeout for each Codex CLI table generation call. Default 300 seconds.")
     return parser.parse_args()
 
 
@@ -49,6 +53,26 @@ def resolve_phase1_output(path_arg):
     raise FileNotFoundError("Phase 1 output file not found. Expected output/final_output.md or output/output.md.")
 
 
+def generate_phase2_data(args, *, model, business_input, ddl_text, semantic_context, output_dir):
+    if args.generation_engine == "python":
+        return generate_synthetic_data(model, args.rows_per_table, args.seed, semantic_context=semantic_context, business_input=business_input)
+    generator = CodexCliDataGenerator(output_dir=output_dir / "codex_generated_data", timeout_seconds=args.codex_timeout_seconds)
+    try:
+        return generator.generate_tables(
+            model=model,
+            business_input=business_input,
+            ddl_text=ddl_text,
+            rows_per_table=args.rows_per_table,
+            allow_fallback=args.allow_generator_fallback,
+        )
+    except CodexCliGenerationError:
+        if not args.allow_generator_fallback:
+            raise
+        data = generate_synthetic_data(model, args.rows_per_table, args.seed, semantic_context=semantic_context, business_input=business_input)
+        data.setdefault("__stats__", {})["generation_engine"] = "python-fallback"
+        return data
+
+
 def main():
     args = parse_args()
     output_dir = Path(args.output_dir)
@@ -64,8 +88,9 @@ def main():
         ddl_text = extract_ddl(markdown)
         model = parse_ddl(ddl_text)
         semantic_context = build_semantic_context(business_input, model)
-        data = generate_synthetic_data(model, args.rows_per_table, args.seed, semantic_context=semantic_context)
-        pre_validation = validate_generated_data(model, data, args.rows_per_table)
+        data = generate_phase2_data(args, model=model, business_input=business_input, ddl_text=ddl_text, semantic_context=semantic_context, output_dir=output_dir)
+        expected_rows = data.get("__expected_rows__", args.rows_per_table)
+        pre_validation = validate_generated_data(model, data, expected_rows, semantic_context=semantic_context, business_input=business_input)
         pre_validation["generation_stats"] = data.get("__stats__", {})
         pre_validation["excel_written"] = False
         if pre_validation["status"] == "failed":
@@ -109,7 +134,11 @@ def main():
                 allow_insert_into_nonempty_tables=args.allow_insert_into_nonempty_tables,
             )
             if load_result["status"] == "passed":
-                post_validation = validate_postgres_load(model, {table.name: args.rows_per_table for table in model.tables})
+                if isinstance(expected_rows, dict):
+                    expected_postgres_rows = {table.name: expected_rows.get(table.name, args.rows_per_table) for table in model.tables}
+                else:
+                    expected_postgres_rows = {table.name: args.rows_per_table for table in model.tables}
+                post_validation = validate_postgres_load(model, expected_postgres_rows)
         write_postgres_report(output_dir / "postgres_load_report.md", args.load_to_postgres, load_result)
         write_validation_report(output_dir / "validation_report.md", pre_validation, post_validation)
         if load_result.get("status") == "failed" or (post_validation and post_validation.get("status") != "passed"):
@@ -117,7 +146,7 @@ def main():
             return 1
         print("Phase 2 completed. See output/synthetic_data_output.xlsx and Phase 2 reports.")
         return 0
-    except (DDLExtractionError, DDLParserError, SyntheticDataError, OSError, ValueError, FileNotFoundError) as exc:
+    except (DDLExtractionError, DDLParserError, SyntheticDataError, CodexCliGenerationError, OSError, ValueError, FileNotFoundError) as exc:
         message = str(exc)
         pre_validation = {"status": "failed", "errors": [message]}
         write_generation_report(
