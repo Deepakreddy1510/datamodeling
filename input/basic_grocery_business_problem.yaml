@@ -67,7 +67,6 @@ business_relationships:
     description: Each order should have delivery tracking information.
 
 entity_attributes:
-
   Customer:
     - customer_id
     - customer_name
@@ -83,7 +82,7 @@ entity_attributes:
     - product_category
     - brand
     - unit_price
-    - active_status
+    - is_active
 
   Store:
     - store_id
@@ -150,4 +149,3 @@ expected_output:
   - Synthetic data generation support
   - Excel output with sample synthetic data
   - PostgreSQL loading support
-

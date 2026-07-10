@@ -12,21 +12,27 @@ def resolve_codex_executable():
         resolved = shutil.which(candidate)
         if resolved:
             return resolved
-    raise CodexRunnerError("Codex CLI executable was not found in PATH. Try running codex --version in the same terminal.")
+    raise CodexRunnerError(
+        "Codex CLI executable was not found in PATH. "
+        "Try running codex --version in the same terminal."
+    )
 
 
 class CodexCLIClient:
     def run_prompt(self, prompt_text):
+        executable = resolve_codex_executable()
         try:
             result = subprocess.run(
-                ["codex", "exec", "-"],
+                [executable, "exec", "-"],
                 input=prompt_text,
                 capture_output=True,
                 text=True,
                 check=True,
             )
         except FileNotFoundError as exc:
-            raise CodexRunnerError("Codex CLI must be installed and authenticated before running this pipeline.") from exc
+            raise CodexRunnerError(
+                f"Codex CLI was found but could not be executed: {executable}"
+            ) from exc
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").strip()
             stdout = (exc.stdout or "").strip()
@@ -54,7 +60,9 @@ class MockCodexClient:
         response = {
             "ai_review_score": self.ai_score,
             "readiness_level": "Ready" if self.ai_score >= 90 else "Medium",
-            "semantic_status": "ready_for_generation" if self.ai_score >= 90 else "needs_improvement",
+            "semantic_status": "ready_for_generation"
+            if self.ai_score >= 90
+            else "needs_improvement",
             "missing_items": [
                 {
                     "section": "entity_attributes",
@@ -77,13 +85,20 @@ class MockCodexClient:
             },
             "reporting_review": {
                 "are_reporting_requirements_supported": False,
-                "missing_reporting_details": ["Reporting grain and metrics may be incomplete."],
+                "missing_reporting_details": [
+                    "Reporting grain and metrics may be incomplete."
+                ],
             },
             "business_rule_review": {
                 "are_business_rules_clear": False,
-                "missing_business_rules": ["Add key business rules for modeling decisions."],
+                "missing_business_rules": [
+                    "Add key business rules for modeling decisions."
+                ],
             },
-            "platform_review": {"is_platform_clear": True, "missing_platform_details": []},
+            "platform_review": {
+                "is_platform_clear": True,
+                "missing_platform_details": [],
+            },
             "suggestions": [
                 "Add missing entity attributes.",
                 "Resolve many-to-many relationships.",

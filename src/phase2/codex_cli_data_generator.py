@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import subprocess
 
+from codex_runner import resolve_codex_executable
+
 from .synthetic_data_generator import finalize_generated_value, table_generation_order
 
 
@@ -47,7 +49,7 @@ class CodexCliDataGenerator:
     def __init__(self, output_dir="output/codex_generated_data", timeout_seconds=300, executable="codex"):
         self.output_dir = Path(output_dir)
         self.timeout_seconds = timeout_seconds
-        self.executable = executable
+        self.executable = resolve_codex_executable() if executable == "codex" else executable
 
     def generate_tables(self, *, model, business_input, ddl_text, rows_per_table, allow_fallback=False):
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -93,8 +95,9 @@ class CodexCliDataGenerator:
     def _run_codex(self, prompt):
         try:
             result = subprocess.run(
-                [self.executable, "exec", prompt],
+                [self.executable, "exec", "-"],
                 text=True,
+                input=prompt,
                 capture_output=True,
                 timeout=self.timeout_seconds,
                 check=False,

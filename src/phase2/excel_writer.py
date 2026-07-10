@@ -1,52 +1,40 @@
-from datetime import date, datetime, time
-from decimal import Decimal
-import json
+import datetime
 from pathlib import Path
-import re
 
 from openpyxl import Workbook
-from openpyxl.styles import Font
-
-INVALID_SHEET_CHARS = re.compile(r"[\\/*?:\[\]]")
 
 
-def _safe_sheet_name(name, used):
-    base = INVALID_SHEET_CHARS.sub("_", name)[:31] or "Sheet"
-    candidate = base
-    suffix = 1
-    while candidate in used:
-        tail = f"_{suffix}"
-        candidate = f"{base[:31 - len(tail)]}{tail}"
-        suffix += 1
-    used.add(candidate)
-    return candidate
-
-
-def _excel_value(value):
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, sort_keys=True)
-    if isinstance(value, (date, datetime, time)):
+def _excel_safe_value(value):
+    """Convert Python values into Excel-safe values."""
+    if isinstance(value, datetime.datetime):
+        if value.tzinfo is not None:
+            return value.replace(tzinfo=None)
         return value
+
+    if isinstance(value, datetime.time):
+        if value.tzinfo is not None:
+            return value.replace(tzinfo=None)
+        return value
+
     return value
 
 
 def write_excel(model, data, output_path):
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+
     workbook = Workbook()
-    workbook.remove(workbook.active)
-    used = set()
+    default_sheet = workbook.active
+    workbook.remove(default_sheet)
+
     for table in model.tables:
-        sheet = workbook.create_sheet(_safe_sheet_name(table.name, used))
-        columns = table.column_names()
-        sheet.append(columns)
-        for cell in sheet[1]:
-            cell.font = Font(bold=True)
-        sheet.freeze_panes = "A2"
-        sheet.auto_filter.ref = sheet.dimensions
+        worksheet = workbook.create_sheet(title=table.name[:31])
+        headers = [column.name for column in table.columns]
+        worksheet.append(headers)
+
         for row in data.get(table.name, []):
-            sheet.append([_excel_value(row.get(column)) for column in columns])
+            worksheet.append(
+                [_excel_safe_value(row.get(column.name)) for column in table.columns]
+            )
+
     workbook.save(path)
-    return path
