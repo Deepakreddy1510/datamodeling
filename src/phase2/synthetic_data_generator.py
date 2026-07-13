@@ -41,6 +41,8 @@ except ImportError:  # pragma: no cover - exercised when optional dependency is 
             return " ".join(self.word() for _ in range(nb_words)).capitalize() + "."
 
 from .semantic_context import build_semantic_context
+from .reference_data_resolver import ReferenceDataResolver
+from .lineage_mapper import analyze_lineage, business_key_columns, entity_name, shared_columns, surrogate_key_columns
 
 
 class SyntheticDataError(Exception):
@@ -235,9 +237,12 @@ def _type_compatible_fallback(column, stats=None, value=None, reason="conversion
 
 def _check_constraint_value(table, column, index, stats):
     for check in getattr(table, "check_constraints", []):
-        if not getattr(check, "supported", False) or check.column != column.name:
+        check_column = str(getattr(check, "column", "") or "").strip().strip('"').lower()
+        column_name = column.name.strip().strip('"').lower()
+        if not getattr(check, "supported", False) or check_column != column_name:
             continue
         if check.operator == "IN" and check.values:
+            stats.setdefault("check_in_value_sources", set()).add(f"{table.name}.{column.name}")
             return normalize_value_for_column(_cycle(check.values, index, column, stats), column, stats)
         if check.operator == "BETWEEN":
             return normalize_value_for_column(check.min_value, column, stats)
@@ -250,6 +255,118 @@ def _check_constraint_value(table, column, index, stats):
             value = base - (Decimal(1) if check.operator == "<" else Decimal(0))
             return normalize_value_for_column(value, column, stats)
     return None
+
+
+def _column_checks(table, column):
+    column_name = column.name.strip().strip('"').lower()
+    return [
+        check for check in getattr(table, "check_constraints", [])
+        if getattr(check, "supported", False)
+        and str(getattr(check, "column", "") or "").strip().strip('"').lower() == column_name
+    ]
+
+
+def _first_check_in_values(table, column):
+    for check in _column_checks(table, column):
+        if check.operator == "IN" and check.values:
+            return check.values
+    return []
+
+
+def _constraint_floor(check):
+    if check.operator == ">":
+        return Decimal(str(check.min_value)) + Decimal("1")
+    if check.operator == ">=":
+        return Decimal(str(check.min_value))
+    return None
+
+
+def _constraint_ceiling(check):
+    if check.operator == "<":
+        return Decimal(str(check.min_value)) - Decimal("1")
+    if check.operator == "<=":
+        return Decimal(str(check.min_value))
+    return None
+
+
+def _constraint_compatible_value(column, checks, index, stats):
+    between = next((check for check in checks if check.operator == "BETWEEN"), None)
+    if between:
+        min_value = Decimal(str(between.min_value))
+        max_value = Decimal(str(between.max_value))
+        span = max_value - min_value
+        value = min_value if span <= 0 else min_value + Decimal((index - 1) % (int(span) + 1))
+        return normalize_value_for_column(value, column, stats)
+
+    floors = [floor for floor in (_constraint_floor(check) for check in checks) if floor is not None]
+    ceilings = [ceiling for ceiling in (_constraint_ceiling(check) for check in checks) if ceiling is not None]
+    if floors or ceilings:
+        floor = max(floors) if floors else Decimal("0")
+        ceiling = min(ceilings) if ceilings else floor + Decimal("100")
+        if ceiling < floor:
+            ceiling = floor
+        return normalize_value_for_column(floor, column, stats)
+    return None
+
+
+def _satisfies_numeric_constraints(value, checks):
+    decimal_value = _to_decimal(value)
+    if decimal_value is None:
+        return False
+    for check in checks:
+        if check.operator == "BETWEEN":
+            if not (Decimal(str(check.min_value)) <= decimal_value <= Decimal(str(check.max_value))):
+                return False
+        elif check.operator == ">":
+            if not decimal_value > Decimal(str(check.min_value)):
+                return False
+        elif check.operator == ">=":
+            if not decimal_value >= Decimal(str(check.min_value)):
+                return False
+        elif check.operator == "<":
+            if not decimal_value < Decimal(str(check.min_value)):
+                return False
+        elif check.operator == "<=":
+            if not decimal_value <= Decimal(str(check.min_value)):
+                return False
+    return True
+
+
+def finalize_generated_value(table, column, value, row_index, row_context, stats):
+    """Central DDL guard for every generated cell before it is stored."""
+    original = value
+    checks = _column_checks(table, column)
+    check_in_values = _first_check_in_values(table, column)
+    if check_in_values:
+        if str(value) not in {str(item) for item in check_in_values}:
+            stats.setdefault("check_in_value_sources", set()).add(f"{table.name}.{column.name}")
+            value = _cycle(check_in_values, row_index, column, stats)
+        value = normalize_value_for_column(value, column, stats)
+    else:
+        normalized = normalize_value_for_column(value, column, stats)
+        if normalized != original:
+            stats.setdefault("ddl_type_corrections", set()).add(f"{table.name}.{column.name}")
+        value = normalized
+
+    constraint_value = _constraint_compatible_value(column, checks, row_index, stats)
+    if constraint_value is not None and not _satisfies_numeric_constraints(value, checks):
+        stats.setdefault("ddl_type_corrections", set()).add(f"{table.name}.{column.name}")
+        value = constraint_value
+
+    name = column.name.lower()
+    if isinstance(value, date) and not isinstance(value, datetime) and "end" in name:
+        start_value = next(
+            (candidate for key, candidate in row_context.items() if "start" in key.lower() and isinstance(candidate, date) and not isinstance(candidate, datetime)),
+            None,
+        )
+        if start_value and value < start_value:
+            value = start_value + timedelta(days=row_index % 30)
+            stats.setdefault("date_rule_corrections", set()).add(f"{table.name}.{column.name}")
+
+    if isinstance(value, str) and column.max_length and len(value) > column.max_length:
+        stats.setdefault("varchar_length_corrections", set()).add(f"{table.name}.{column.name}")
+        value = _bounded(value, column, stats)
+    return value
 
 
 def normalize_value_for_column(value, column, stats=None):
@@ -279,7 +396,7 @@ def normalize_value_for_column(value, column, stats=None):
             return True
         if normalized in {"false", "no", "0", "n"}:
             return False
-        return bool(value)
+        return _type_compatible_fallback(column, stats, value, "boolean conversion failed")
     if dtype.startswith("date"):
         if isinstance(value, date) and not isinstance(value, datetime):
             return value
@@ -547,6 +664,41 @@ def _generic_label(prefix, index):
     return f"{prefix} {index:03d}"
 
 
+def _entity_base(table_name):
+    return re.sub(r"^(load_|stg_|dim_|fact_)", "", table_name.lower()).replace("_raw", "")
+
+
+def _shared_entity_key(table_name):
+    base = _entity_base(table_name)
+    parts = [part for part in base.split("_") if part not in {"raw", "fact"}]
+    return parts[-1] if parts else base
+
+
+def _reuse_entity_values(table, row, index, entity_store, stats):
+    """Reuse same-named business attributes across load/stg/dim layers."""
+    base = _shared_entity_key(table.name)
+    reusable_names = {
+        column.name for column in table.columns
+        if not column.is_primary_key and not column.name.lower().endswith(("_key", "_id"))
+    }
+    if not reusable_names:
+        return
+    stored = entity_store.setdefault(base, {})
+    row_store = stored.setdefault(index, {})
+    reused = 0
+    for name in reusable_names:
+        if name in row_store:
+            original = row_store[name]
+            column = next((candidate for candidate in table.columns if candidate.name == name), None)
+            row[name] = finalize_generated_value(table, column, original, index, row, stats) if column else original
+            if row[name] != original:
+                stats.setdefault("incompatible_reuse_corrections", set()).add(f"{table.name}.{name}")
+            reused += 1
+        elif name in row:
+            row_store[name] = row[name]
+    if reused:
+        stats.setdefault("entity_reuse_events", set()).add(f"{table.name}:{base}:{reused}")
+
 
 def _context_phrase(semantic_context, fallback="Item"):
     terms = []
@@ -580,20 +732,44 @@ def _apply_semantic_consistency(table, row, index, stats):
     for column in table.columns:
         name = column.name.lower()
         if "email" in name and first and last:
-            row[column.name] = _short_email(index, column, stats, first, last)
+            row[column.name] = finalize_generated_value(table, column, _short_email(index, column, stats, first, last), index, row, stats)
     order_like = row.get("order_date") or row.get("created_at")
     payment_like = row.get("payment_date")
     if isinstance(order_like, date) and isinstance(payment_like, date) and payment_like < order_like:
         row["payment_date"] = order_like
 
 
-def _fallback_value(fake, rng, table, column, index, stats, semantic_context=None):
+def _fallback_value(fake, rng, table, column, index, stats, semantic_context=None, reference_resolver=None):
     name = column.name.lower()
     dtype = column.data_type.lower()
     table_base = table.name.replace("dim_", "").replace("fact_", "").replace("stg_", "").replace("load_", "").replace("_raw", "")
     title = table_base.replace("_", " ").title() or "Item"
     semantic_type = _semantic_type_for(semantic_context, table, column)
     context_label = _context_phrase(semantic_context, title)
+
+    # DDL data types win before semantic or reference-data generation.
+    if "bool" in dtype:
+        return index % 2 == 0
+    if dtype.startswith("date"):
+        if semantic_type == "birth_date" or "birth" in name:
+            return date(1970 + (index % 35), ((index - 1) % 12) + 1, ((index - 1) % 28) + 1)
+        return SYNTHETIC_BASE_DATE - timedelta(days=rng.randint(0, 730))
+    if dtype.startswith("time") and "timestamp" not in dtype:
+        return dt_time(index % 23, index % 59, 0)
+    if "timestamp" in dtype or "timestamptz" in dtype:
+        return datetime.combine(SYNTHETIC_BASE_DATE, dt_time(index % 23, index % 59, 0)) - timedelta(days=rng.randint(0, 730))
+    if _is_integer_type(column):
+        if any(word in name for word in ["quantity", "count", "number", "score", "rank"]):
+            return rng.randint(1, 25)
+        return rng.randint(1, 1000)
+    if _is_numeric_type(column):
+        return _numeric_value(rng, column, stats, 0, 100 if any(word in name for word in ["rate", "percentage", "ratio", "score"]) else None)
+
+    if reference_resolver is not None and any(token in dtype for token in ["char", "text"]) and semantic_type in {"status", "category", "type", "method", "role", "position", "priority", "country", "nationality"}:
+        reference_values, reference_key = reference_resolver.resolve(table.name, column.name, semantic_type)
+        if reference_values:
+            stats.setdefault("reference_data_matches", set()).add(f"{table.name}.{column.name} -> {reference_key}")
+            return _cycle(reference_values, index, column, stats)
 
     if semantic_type == "json" or _is_json_type(column):
         return {"generated": True, "row_number": index, "source": "synthetic", "semantic": table_base}
@@ -617,8 +793,8 @@ def _fallback_value(fake, rng, table, column, index, stats, semantic_context=Non
         return _bounded(fake.first_name(), column, stats)
     if "last_name" in name:
         return _bounded(fake.last_name(), column, stats)
-    if semantic_type == "product_or_service" or any(token in name for token in ["product_name", "service_name", "item_name"]):
-        return _bounded(f"{context_label} {fake.word().title()} {index:03d}", column, stats)
+    if semantic_type in {"product_name", "service_name"} or any(token in name for token in ["product_name", "service_name", "item_name"]):
+        return _bounded(f"{context_label} {fake.word().title()} {fake.word().title()}", column, stats)
     if any(token in name for token in ["store_name", "branch_name", "location_name", "company_name", "organization_name"]):
         return _bounded(f"{context_label} {fake.city()} {title} {index:03d}", column, stats)
     if semantic_type == "status" or name.endswith("status") or name == "status":
@@ -627,25 +803,19 @@ def _fallback_value(fake, rng, table, column, index, stats, semantic_context=Non
         return _cycle(GENERIC_SEGMENTS, index, column, stats)
     if semantic_type == "method" or "method" in name:
         return _cycle(GENERIC_METHODS, index, column, stats)
+    if semantic_type in {"role", "position"} or name in {"role", "position"} or name.endswith(("_role", "_position")):
+        return _cycle(["Lead", "Associate", "Specialist", "Coordinator", "Manager"], index, column, stats)
+    if semantic_type == "nationality" or "nationality" in name:
+        return _bounded(fake.country(), column, stats)
     if semantic_type == "category" or "category" in name or name.endswith("type") or name == "type":
         return _bounded(f"{context_label} {GENERIC_TYPES[(index - 1) % len(GENERIC_TYPES)]}", column, stats)
-    if "date" in dtype or name.endswith("date"):
-        return date.today() - timedelta(days=rng.randint(0, 730))
-    if dtype.startswith("time") and "timestamp" not in dtype:
-        return dt_time(index % 23, index % 59, 0)
-    if "timestamp" in dtype or "timestamptz" in dtype or "time" in name:
-        return datetime.now().replace(microsecond=0) - timedelta(days=rng.randint(0, 730), seconds=rng.randint(0, 86400))
-    if "bool" in dtype or name.startswith("is_") or name.endswith("flag"):
+    if "time" in name:
+        return datetime.combine(SYNTHETIC_BASE_DATE, dt_time(index % 23, index % 59, 0)) - timedelta(days=rng.randint(0, 730))
+    if name.startswith("is_") or name.endswith("flag"):
         return index % 2 == 0
-    if any(token in dtype for token in ["int", "serial"]):
-        return rng.randint(1, 1000)
-    if _is_numeric_type(column):
-        return _numeric_value(rng, column, stats)
-    if any(token in dtype for token in ["char", "text"]):
-        return _bounded(_generic_label(title, index), column, stats)
-    if any(word in name for word in ["amount", "price", "cost", "total", "rate", "score", "percentage", "ratio", "value"]):
+    if not any(token in dtype for token in ["char", "text"]) and any(word in name for word in ["amount", "price", "cost", "total", "rate", "score", "percentage", "ratio", "value"]):
         return _numeric_value(rng, column, stats, 0, 100 if any(word in name for word in ["rate", "percentage", "ratio", "score"]) else None)
-    if any(word in name for word in ["quantity", "count", "number"]):
+    if not any(token in dtype for token in ["char", "text"]) and any(word in name for word in ["quantity", "count", "number"]):
         return rng.randint(1, 25)
     if "uuid" in dtype:
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{table.name}.{column.name}.{index}"))
@@ -654,7 +824,11 @@ def _fallback_value(fake, rng, table, column, index, stats, semantic_context=Non
     if any(word in name for word in ["description", "comment", "notes"]):
         return _bounded(fake.sentence(nb_words=8), column, stats)
     if "name" in name:
-        return _bounded(_generic_label(title, index), column, stats)
+        if any(token in name for token in ["company", "organization", "organisation", "product", "service", "item"]):
+            return _bounded(f"{context_label} {fake.word().title()} {fake.word().title()}", column, stats)
+        return _bounded(fake.name(), column, stats)
+    if any(token in dtype for token in ["char", "text"]):
+        return _bounded(f"Synthetic {context_label} {fake.word().title()} {index:03d}", column, stats)
     stats["generic_fallback_values"] += 1
     return _bounded(f"Synthetic {context_label} {index:03d}", column, stats)
 
@@ -669,8 +843,12 @@ def _to_decimal(value):
 def _infer_calculated_value(row, column):
     name = column.name.lower()
     quantity = _to_decimal(row.get("quantity"))
+    if quantity is None:
+        quantity = next((_to_decimal(value) for key, value in row.items() if any(token in key.lower() for token in ["quantity", "count", "sold"]) and _to_decimal(value) is not None), None)
     unit_price = _to_decimal(row.get("unit_price"))
     price = _to_decimal(row.get("price"))
+    if price is None:
+        price = next((_to_decimal(value) for key, value in row.items() if "price" in key.lower() and _to_decimal(value) is not None), None)
     cost = _to_decimal(row.get("cost"))
     revenue = _to_decimal(row.get("revenue"))
 
@@ -698,15 +876,84 @@ def _infer_calculated_value(row, column):
 
 def _finalize_calculations(model, generated, stats):
     for table in model.tables:
-        for row in generated.get(table.name, []):
+        for row_index, row in enumerate(generated.get(table.name, []), start=1):
             for column in table.columns:
                 value = _infer_calculated_value(row, column)
                 if value is not None:
                     if column.numeric_precision is not None or column.numeric_scale is not None:
                         scale = column.numeric_scale or 0
                         value = Decimal(value).quantize(Decimal(1).scaleb(-scale) if scale else Decimal(1))
-                    row[column.name] = _bounded(value, column, stats)
+                    row[column.name] = finalize_generated_value(table, column, _bounded(value, column, stats), row_index, row, stats)
+                    stats.setdefault("calculation_corrections", set()).add(f"{table.name}.{column.name}")
                     stats["calculated_columns"].add(f"{table.name}.{column.name}")
+
+
+def _finalize_row_values(table, row, index, stats):
+    for column in table.columns:
+        row[column.name] = finalize_generated_value(table, column, row.get(column.name), index, row, stats)
+
+
+def _lineage_source_row(source_table, target_table, target_row, generated, index):
+    source_rows = generated.get(source_table.name, [])
+    if not source_rows:
+        return None
+    keys = [key for key in business_key_columns(source_table) if key in target_table.column_names() and key in target_row]
+    if keys:
+        target_key = tuple(target_row.get(key) for key in keys)
+        for source_row in source_rows:
+            if tuple(source_row.get(key) for key in keys) == target_key:
+                return source_row
+    return source_rows[(index - 1) % len(source_rows)]
+
+
+def _copy_lineage_columns(source_table, target_table, source_row, target_row, stats):
+    copied = 0
+    for column in shared_columns(source_table, target_table, include_keys=True):
+        if column in source_row and column in target_table.column_names():
+            target_row[column] = source_row[column]
+            copied += 1
+    if copied:
+        stats.setdefault("lineage_derivations", set()).add(f"{source_table.name} -> {target_table.name}:{copied}")
+
+
+def _apply_lineage_derivation(table, row, index, generated, lineage, stats):
+    current_entity = entity_name(table.name)
+    layers = lineage.get("entities", {}).get(current_entity, {})
+    if table is layers.get("staging"):
+        source = layers.get("raw")
+        if source:
+            source_row = _lineage_source_row(source, table, row, generated, index)
+            if source_row:
+                _copy_lineage_columns(source, table, source_row, row, stats)
+    if table is layers.get("dimension"):
+        source = layers.get("staging") or layers.get("raw")
+        if source:
+            source_row = _lineage_source_row(source, table, row, generated, index)
+            if source_row:
+                _copy_lineage_columns(source, table, source_row, row, stats)
+
+    for mapping in lineage.get("fact_to_dimension", []):
+        if mapping["fact"] is not table:
+            continue
+        dimension = mapping["dimension"]
+        dim_rows = generated.get(dimension.name, [])
+        if not dim_rows:
+            continue
+        dim_key = mapping["dimension_key"]
+        entity_keys = mapping["business_keys"]
+        dim_row = None
+        if entity_keys:
+            for candidate in dim_rows:
+                if all(row.get(key) == candidate.get(key) for key in entity_keys):
+                    dim_row = candidate
+                    break
+        if dim_row is None:
+            dim_row = dim_rows[(index - 1) % len(dim_rows)]
+            for key in entity_keys:
+                if key in row and key in dim_row:
+                    row[key] = dim_row[key]
+        row[dim_key] = dim_row.get(dim_key)
+        stats.setdefault("lineage_fact_key_resolutions", set()).add(f"{table.name}.{dim_key} -> {dimension.name}.{dim_key}")
 
 
 def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_context=None, business_input=None):
@@ -717,6 +964,9 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
     table_map = model.table_map()
     if semantic_context is None:
         semantic_context = build_semantic_context(business_input or {}, model)
+    reference_resolver = ReferenceDataResolver(business_input or {})
+    entity_store = {}
+    lineage = analyze_lineage(model)
     stats = {
         "truncated_values": 0,
         "numeric_bounded_values": 0,
@@ -733,6 +983,21 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
         "type_normalization_warnings": [],
         "semantic_types": {},
         "semantic_context_terms": list(getattr(semantic_context, "domain_terms", [])[:10]),
+        "reference_data_matches": set(),
+        "entity_reuse_events": set(),
+        "relationship_generation_events": set(),
+        "check_in_value_sources": set(),
+        "ddl_type_corrections": set(),
+        "varchar_length_corrections": set(),
+        "incompatible_reuse_corrections": set(),
+        "calculation_corrections": set(),
+        "date_rule_corrections": set(),
+        "lineage_derivations": set(),
+        "lineage_fact_key_resolutions": set(),
+        "lineage_entities": sorted(lineage.get("entities", {}).keys()),
+        "lineage_raw_to_staging": [f"{item['source'].name} -> {item['target'].name}" for item in lineage.get("raw_to_staging", [])],
+        "lineage_staging_to_dimension": [f"{item['source'].name} -> {item['target'].name}" for item in lineage.get("staging_to_dimension", [])],
+        "lineage_fact_to_dimension": [f"{item['fact'].name}.{item['dimension_key']} -> {item['dimension'].name}.{item['dimension_key']}" for item in lineage.get("fact_to_dimension", [])],
     }
     for semantic in getattr(semantic_context, "column_semantics", {}).values():
         stats["semantic_types"].setdefault(semantic.semantic_type, 0)
@@ -755,7 +1020,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
                 if value is None:
                     stats["fallback_columns_used"].add(f"{table.name}.{column.name}")
                     stats["fallback_to_ddl_inference_count"] += 1
-                    value = _fallback_value(fake, rng, table, column, index, stats, semantic_context)
+                    value = _fallback_value(fake, rng, table, column, index, stats, semantic_context, reference_resolver)
                 row[column.name] = value
             for fk in table.foreign_keys:
                 parent = table_map[fk.parent_table.lower()]
@@ -763,10 +1028,15 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
                 parent_row = parent_rows[(index - 1) % len(parent_rows)]
                 for child_col, parent_col in zip(fk.child_columns, fk.parent_columns):
                     row[child_col] = parent_row[parent_col]
+                    stats.setdefault("relationship_generation_events", set()).add(f"{table.name}.{child_col} -> {parent.name}.{parent_col}")
+            _reuse_entity_values(table, row, index, entity_store, stats)
+            _apply_lineage_derivation(table, row, index, generated, lineage, stats)
             _apply_semantic_consistency(table, row, index, stats)
             _apply_lifecycle_order(row)
+            _finalize_row_values(table, row, index, stats)
             _enforce_primary_key(table, row, seen_primary_keys, index, stats)
             _enforce_unique_constraints(table, row, seen_unique, index, stats, generated)
+            _finalize_row_values(table, row, index, stats)
             rows.append(row)
         generated[table.name] = rows
     _finalize_calculations(model, generated, stats)
@@ -775,5 +1045,16 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
     stats["fk_safe_unique_adjustments"] = sorted(stats["fk_safe_unique_adjustments"])
     stats["composite_unique_adjustments"] = sorted(stats["composite_unique_adjustments"])
     stats["primary_key_repairs"] = sorted(stats["primary_key_repairs"])
+    stats["reference_data_matches"] = sorted(stats["reference_data_matches"])
+    stats["entity_reuse_events"] = sorted(stats["entity_reuse_events"])
+    stats["relationship_generation_events"] = sorted(stats["relationship_generation_events"])
+    stats["check_in_value_sources"] = sorted(stats["check_in_value_sources"])
+    stats["ddl_type_corrections"] = sorted(stats["ddl_type_corrections"])
+    stats["varchar_length_corrections"] = sorted(stats["varchar_length_corrections"])
+    stats["incompatible_reuse_corrections"] = sorted(stats["incompatible_reuse_corrections"])
+    stats["calculation_corrections"] = sorted(stats["calculation_corrections"])
+    stats["date_rule_corrections"] = sorted(stats["date_rule_corrections"])
+    stats["lineage_derivations"] = sorted(stats["lineage_derivations"])
+    stats["lineage_fact_key_resolutions"] = sorted(stats["lineage_fact_key_resolutions"])
     generated["__stats__"] = stats
     return generated
