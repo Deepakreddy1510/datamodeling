@@ -197,3 +197,17 @@ CREATE TABLE postgres_type_test (
     assert columns["amount"].numeric_scale == 2
     assert "NOT NULL" not in columns["payload"].data_type.upper()
     assert "DEFAULT" not in columns["event_time"].data_type.upper()
+
+
+def test_parse_postgres_any_array_check_as_in_allowed_values():
+    model = parse_ddl("""
+CREATE TABLE enum_array_check (
+  status varchar(20),
+  CHECK ((status)::text = ANY (ARRAY['Scheduled'::text,'Completed'::text]))
+);
+""")
+    check = model.tables[0].check_constraints[0]
+    assert check.supported is True
+    assert check.operator == "IN"
+    assert check.column == "status"
+    assert check.values == ["Scheduled", "Completed"]
