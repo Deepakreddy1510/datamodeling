@@ -31,6 +31,15 @@ def _rows_by_key(rows, keys):
     return {tuple(row.get(key) for key in keys): row for row in rows}
 
 
+def _find_row_by_identity(rows, identity):
+    if not identity:
+        return None
+    for row in rows:
+        if all(row.get(key) == value for key, value in identity.items()):
+            return row
+    return None
+
+
 def _display_table(table):
     return table.name if hasattr(table, "name") else str(table)
 
@@ -106,6 +115,26 @@ def validate_lineage(model, data):
             lineage_payload = fact_row.get("__lineage_business_keys__", {}).get(dim_key, {})
             lineage_business_keys = lineage_payload.get("business_keys", lineage_payload) if isinstance(lineage_payload, dict) else {}
             if lineage_business_keys:
+                if isinstance(lineage_payload, dict):
+                    resolved_key = lineage_payload.get("resolved_dimension_key")
+                    if resolved_key is not None and fact_row.get(dim_key) != resolved_key:
+                        errors.append(f"{fact.name}.{dim_key} row {idx} changed from resolved source lineage key {resolved_key} to {fact_row.get(dim_key)}.")
+                        continue
+                    source_table = lineage_payload.get("source_table")
+                    source_identity = lineage_payload.get("source_row_key_values", {})
+                    if source_table and source_identity:
+                        source_row = _find_row_by_identity(data.get(source_table, []), source_identity)
+                        if not source_row:
+                            errors.append(f"{fact.name}.{dim_key} row {idx} cannot re-find source row in {source_table} using lineage keys {source_identity}.")
+                            continue
+                        source_mismatch = False
+                        for key, expected_value in lineage_business_keys.items():
+                            if source_row.get(key) != expected_value:
+                                errors.append(f"{fact.name}.{dim_key} row {idx} source {source_table}.{key} is {source_row.get(key)} but lineage expected {expected_value}.")
+                                source_mismatch = True
+                                break
+                        if source_mismatch:
+                            continue
                 for key, expected_value in lineage_business_keys.items():
                     if dim_row.get(key) != expected_value:
                         errors.append(f"{fact.name}.{dim_key} row {idx} points to {dimension.name} {key}={dim_row.get(key)} but source lineage has {key}={expected_value}.")

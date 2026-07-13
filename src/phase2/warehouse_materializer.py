@@ -19,6 +19,8 @@ def materialize_lineage_row(table, row, index, generated, plan, stats, finalize_
         "raw_to_staging": plan.raw_to_staging,
         "staging_to_dimension": plan.staging_to_dimension,
         "fact_to_dimension": plan.fact_to_dimension,
+        "staging_tables": plan.staging_tables,
+        "fact_sources": plan.fact_sources,
     }, stats)
     finalize_row(table, row, index, stats)
     return row

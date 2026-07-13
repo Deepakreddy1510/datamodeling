@@ -919,6 +919,81 @@ def _copy_lineage_columns(source_table, target_table, source_row, target_row, st
         stats.setdefault("lineage_derivations", set()).add(f"{source_table.name} -> {target_table.name}:{copied}")
 
 
+def _event_identity_values(row, preferred_keys=None):
+    """Capture stable row identity values used to re-find source/event rows."""
+    preferred_keys = preferred_keys or []
+    identity = {
+        key: row.get(key)
+        for key in preferred_keys
+        if key in row and row.get(key) not in (None, "")
+    }
+    for key, value in row.items():
+        lowered = key.lower()
+        if lowered.endswith("_id") and not lowered.endswith("_key") and value not in (None, ""):
+            identity.setdefault(key, value)
+    return identity
+
+
+def _related_source_row_for_business_key(primary_row, business_key, generated, staging_tables):
+    """Find a related staging/event row that carries the requested dimension business key.
+
+    The join is metadata-driven: use shared non-target *_id values between the primary
+    fact source row and candidate staging rows. This supports common warehouse event
+    chains like line-item -> order without naming a specific business domain.
+    """
+    if business_key in primary_row and primary_row.get(business_key) not in (None, ""):
+        return None, primary_row, {business_key: primary_row.get(business_key)}
+    primary_join_keys = {
+        key: value
+        for key, value in primary_row.items()
+        if key != business_key and key.lower().endswith("_id") and value not in (None, "")
+    }
+    best = None
+    for staging in staging_tables:
+        for candidate in generated.get(staging.name, []):
+            if business_key not in candidate or candidate.get(business_key) in (None, ""):
+                continue
+            shared = {
+                key: value
+                for key, value in primary_join_keys.items()
+                if key in candidate and candidate.get(key) == value
+            }
+            if not shared:
+                continue
+            score = len(shared)
+            if best is None or score > best[0]:
+                best = (score, staging, candidate, shared)
+    if best is None:
+        return None, None, {}
+    _, staging, candidate, _shared = best
+    return staging, candidate, {business_key: candidate.get(business_key)}
+
+
+def _fact_dimension_source(mapping, row, generated, lineage):
+    source_lineage = row.get("__source_lineage__", {})
+    primary_table_name = source_lineage.get("source_table") if isinstance(source_lineage, dict) else None
+    primary_row = source_lineage.get("source_row", {}) if isinstance(source_lineage, dict) else {}
+    staging_tables = lineage.get("staging_tables", [])
+    staging_by_name = {table.name: table for table in staging_tables}
+    primary_table = staging_by_name.get(primary_table_name)
+    business_keys = mapping["business_keys"] or mapping.get("dimension_business_keys", [])
+    for business_key in business_keys:
+        source_table, source_row, values = _related_source_row_for_business_key(primary_row, business_key, generated, staging_tables)
+        if values:
+            return {
+                "source_table": (source_table or primary_table).name if (source_table or primary_table) else primary_table_name,
+                "source_row": source_row,
+                "source_row_key_values": _event_identity_values(source_row, [business_key]),
+                "business_keys": values,
+            }
+    return {
+        "source_table": primary_table_name,
+        "source_row": primary_row,
+        "source_row_key_values": _event_identity_values(primary_row, business_keys),
+        "business_keys": {},
+    }
+
+
 def _apply_lineage_derivation(table, row, index, generated, lineage, stats):
     current_entity = entity_name(table.name)
     layers = lineage.get("entities", {}).get(current_entity, {})
@@ -944,12 +1019,13 @@ def _apply_lineage_derivation(table, row, index, generated, lineage, stats):
             continue
         dim_key = mapping["dimension_key"]
         entity_keys = mapping["business_keys"] or mapping.get("dimension_business_keys", [])
-        source_lineage = row.get("__source_lineage__", {})
-        source_row = source_lineage.get("source_row", {}) if isinstance(source_lineage, dict) else {}
+        source_details = _fact_dimension_source(mapping, row, generated, lineage)
+        source_row = source_details.get("source_row", {})
+        source_business_keys = source_details.get("business_keys", {})
         dim_row = None
         if entity_keys:
             for candidate in dim_rows:
-                if all((source_row.get(key, row.get(key)) == candidate.get(key)) for key in entity_keys):
+                if all(source_business_keys.get(key, row.get(key)) == candidate.get(key) for key in entity_keys):
                     dim_row = candidate
                     break
         if dim_row is None:
@@ -960,10 +1036,12 @@ def _apply_lineage_derivation(table, row, index, generated, lineage, stats):
         row[dim_key] = dim_row.get(dim_key)
         if entity_keys:
             row.setdefault("__lineage_business_keys__", {})[dim_key] = {
-                "source_table": source_lineage.get("source_table"),
+                "source_table": source_details.get("source_table"),
+                "source_row_key_values": source_details.get("source_row_key_values", {}),
                 "dimension_table": dimension.name,
+                "dimension_key": dim_key,
                 "resolved_dimension_key": dim_row.get(dim_key),
-                "business_keys": {key: source_row.get(key, dim_row.get(key)) for key in entity_keys},
+                "business_keys": {key: source_business_keys.get(key, dim_row.get(key)) for key in entity_keys},
             }
         stats.setdefault("lineage_fact_key_resolutions", set()).add(f"{table.name}.{dim_key} -> {dimension.name}.{dim_key}")
 

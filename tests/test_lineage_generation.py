@@ -78,7 +78,7 @@ def test_lineage_validator_fails_when_fact_key_points_to_wrong_dimension():
     data["fact_sales"][0]["item_key"] = data["dim_item"][1]["item_key"]
     validation = validate_generated_data(model, data, 3)
     assert validation["status"] == "failed"
-    assert any("points to dim_item" in err for err in validation["lineage_validation"]["errors"])
+    assert any("dim_item" in err or "resolved source lineage key" in err for err in validation["lineage_validation"]["errors"])
 
 
 def test_lineage_generation_works_for_non_pharma_route_example():
@@ -139,3 +139,102 @@ CREATE TABLE fact_sales (sales_key integer PRIMARY KEY, product_key integer REFE
     broken = validate_generated_data(model, data, 3)
     assert broken["status"] == "failed"
     assert any("source lineage" in err for err in broken["lineage_validation"]["errors"])
+
+
+def _surrogate_fact_join_model():
+    return parse_ddl("""
+CREATE TABLE load_product_raw (product_id varchar(20) PRIMARY KEY, product_name varchar(50));
+CREATE TABLE stg_product (product_id varchar(20) PRIMARY KEY, product_name varchar(50));
+CREATE TABLE dim_product (product_key integer PRIMARY KEY, product_id varchar(20), product_name varchar(50), UNIQUE (product_id));
+CREATE TABLE load_customer_raw (customer_id varchar(20) PRIMARY KEY, customer_name varchar(50));
+CREATE TABLE stg_customer (customer_id varchar(20) PRIMARY KEY, customer_name varchar(50));
+CREATE TABLE dim_customer (customer_key integer PRIMARY KEY, customer_id varchar(20), customer_name varchar(50), UNIQUE (customer_id));
+CREATE TABLE load_store_raw (store_id varchar(20) PRIMARY KEY, store_name varchar(50));
+CREATE TABLE stg_store (store_id varchar(20) PRIMARY KEY, store_name varchar(50));
+CREATE TABLE dim_store (store_key integer PRIMARY KEY, store_id varchar(20), store_name varchar(50), UNIQUE (store_id));
+CREATE TABLE stg_order (order_id varchar(20) PRIMARY KEY, customer_id varchar(20), store_id varchar(20));
+CREATE TABLE stg_order_item (order_item_id varchar(20) PRIMARY KEY, order_id varchar(20), product_id varchar(20), quantity integer CHECK (quantity > 0), unit_price numeric(8,2) CHECK (unit_price > 0));
+CREATE TABLE fact_sales (
+  sales_key integer PRIMARY KEY,
+  product_key integer REFERENCES dim_product(product_key),
+  customer_key integer REFERENCES dim_customer(customer_key),
+  store_key integer REFERENCES dim_store(store_key),
+  quantity integer CHECK (quantity > 0),
+  unit_price numeric(8,2) CHECK (unit_price > 0),
+  line_total_amount numeric(10,2)
+);
+""")
+
+
+def _surrogate_fact_join_data(seed=80):
+    model = _surrogate_fact_join_model()
+    data = generate_synthetic_data(model, rows_per_table=4, seed=seed)
+    validation = validate_generated_data(model, data, 4)
+    assert validation["status"] in {"passed", "passed_with_warnings"}
+    assert validation["lineage_validation"]["status"] == "passed"
+    return model, data
+
+
+def test_fact_surrogate_keys_resolve_from_primary_and_related_staging_sources():
+    model, data = _surrogate_fact_join_data()
+    product_by_key = {row["product_key"]: row for row in data["dim_product"]}
+    customer_by_key = {row["customer_key"]: row for row in data["dim_customer"]}
+    store_by_key = {row["store_key"]: row for row in data["dim_store"]}
+    order_by_id = {row["order_id"]: row for row in data["stg_order"]}
+    item_by_id = {row["order_item_id"]: row for row in data["stg_order_item"]}
+
+    for fact in data["fact_sales"]:
+        lineage = fact["__lineage_business_keys__"]
+        product_source = lineage["product_key"]
+        customer_source = lineage["customer_key"]
+        store_source = lineage["store_key"]
+
+        item = item_by_id[product_source["source_row_key_values"]["order_item_id"]]
+        related_order = order_by_id[customer_source["source_row_key_values"]["order_id"]]
+        assert item["order_id"] == related_order["order_id"]
+        assert product_source["source_table"] == "stg_order_item"
+        assert customer_source["source_table"] == "stg_order"
+        assert store_source["source_table"] == "stg_order"
+        assert product_by_key[fact["product_key"]]["product_id"] == item["product_id"]
+        assert customer_by_key[fact["customer_key"]]["customer_id"] == related_order["customer_id"]
+        assert store_by_key[fact["store_key"]]["store_id"] == related_order["store_id"]
+        assert fact["line_total_amount"] == fact["quantity"] * fact["unit_price"]
+
+    validation = validate_generated_data(model, data, 4)
+    assert validation["lineage_validation"]["status"] == "passed"
+
+
+def test_mutating_primary_staging_business_key_fails_surrogate_fact_lineage():
+    model, data = _surrogate_fact_join_data(seed=81)
+    data["stg_order_item"][0]["product_id"] = data["stg_order_item"][1]["product_id"]
+    broken = validate_generated_data(model, data, 4)
+    assert broken["status"] == "failed"
+    assert any("stg_order_item" in err for err in broken["lineage_validation"]["errors"])
+
+
+def test_mutating_related_staging_business_keys_fails_surrogate_fact_lineage():
+    model, data = _surrogate_fact_join_data(seed=82)
+    data["stg_order"][0]["customer_id"] = data["stg_order"][1]["customer_id"]
+    broken_customer = validate_generated_data(model, data, 4)
+    assert broken_customer["status"] == "failed"
+    assert any("stg_order" in err and "customer" in err for err in broken_customer["lineage_validation"]["errors"])
+
+    model, data = _surrogate_fact_join_data(seed=83)
+    data["stg_order"][0]["store_id"] = data["stg_order"][1]["store_id"]
+    broken_store = validate_generated_data(model, data, 4)
+    assert broken_store["status"] == "failed"
+    assert any("stg_order" in err and "store" in err for err in broken_store["lineage_validation"]["errors"])
+
+
+def test_mutating_dimension_or_fact_surrogate_fails_surrogate_fact_lineage():
+    model, data = _surrogate_fact_join_data(seed=84)
+    data["dim_product"][0]["product_id"] = data["dim_product"][1]["product_id"]
+    broken_dimension = validate_generated_data(model, data, 4)
+    assert broken_dimension["status"] == "failed"
+    assert any("dim_product" in err for err in broken_dimension["lineage_validation"]["errors"])
+
+    model, data = _surrogate_fact_join_data(seed=85)
+    data["fact_sales"][0]["product_key"] = data["dim_product"][1]["product_key"]
+    broken_fact = validate_generated_data(model, data, 4)
+    assert broken_fact["status"] == "failed"
+    assert any("changed from resolved source lineage key" in err for err in broken_fact["lineage_validation"]["errors"])
