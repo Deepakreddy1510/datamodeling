@@ -82,12 +82,14 @@ def analyze_lineage(model):
             dim_entity = entity_name(dimension.name)
             for dim_key in surrogate_key_columns(dimension):
                 if dim_key in fact_columns:
-                    business_keys = [key for key in business_key_columns(dimension) if key in fact_columns]
+                    dimension_business_keys = business_key_columns(dimension)
+                    business_keys = [key for key in dimension_business_keys if key in fact_columns]
                     mappings["fact_to_dimension"].append({
                         "fact": fact,
                         "dimension": dimension,
                         "dimension_key": dim_key,
                         "business_keys": business_keys,
+                        "dimension_business_keys": dimension_business_keys,
                         "entity": dim_entity,
                     })
     return mappings

@@ -94,13 +94,21 @@ def validate_lineage(model, data):
         dimension = mapping["dimension"]
         dim_key = mapping["dimension_key"]
         business_keys = mapping["business_keys"]
+        dimension_business_keys = mapping.get("dimension_business_keys", [])
         checked_fact_dimension.append(f"{fact.name}.{dim_key} -> {dimension.name}.{dim_key}")
-        if not business_keys:
+        if not business_keys and not dimension_business_keys:
             continue
         dim_by_surrogate = {row.get(dim_key): row for row in data.get(dimension.name, [])}
         for idx, fact_row in enumerate(data.get(fact.name, []), start=1):
             dim_row = dim_by_surrogate.get(fact_row.get(dim_key))
             if not dim_row:
+                continue
+            lineage_business_keys = fact_row.get("__lineage_business_keys__", {}).get(dim_key, {})
+            if lineage_business_keys:
+                for key, expected_value in lineage_business_keys.items():
+                    if dim_row.get(key) != expected_value:
+                        errors.append(f"{fact.name}.{dim_key} row {idx} points to {dimension.name} {key}={dim_row.get(key)} but source lineage has {key}={expected_value}.")
+                        break
                 continue
             for key in business_keys:
                 if fact_row.get(key) != dim_row.get(key):

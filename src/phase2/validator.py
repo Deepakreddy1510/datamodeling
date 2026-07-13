@@ -165,8 +165,11 @@ def validate_generated_data(model, data, expected_rows, semantic_context=None, b
             checked_fks.append(_fk_label(fk))
             parent = table_map[fk.parent_table.lower()]
             parent_keys = {tuple(row.get(col) for col in fk.parent_columns) for row in data.get(parent.name, [])}
+            child_column_lookup = {column.name: column for column in table.columns}
             for row in rows:
                 child_key = tuple(row.get(col) for col in fk.child_columns)
+                if any(value in (None, "") and child_column_lookup.get(col, None) and child_column_lookup[col].nullable for col, value in zip(fk.child_columns, child_key)):
+                    continue
                 if child_key not in parent_keys:
                     errors.append(f"{table.name}: foreign key {fk.child_columns} value {child_key} not found in {parent.name}.")
                     break

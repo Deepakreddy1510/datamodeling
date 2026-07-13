@@ -122,3 +122,20 @@ def test_canonical_records_are_extracted_from_source_layers():
     canonical = CanonicalRecordGenerator(model).from_generated_sources(data)
     assert "item" in canonical
     assert canonical["item"] == data["load_item_raw"]
+
+
+def test_fact_surrogate_only_lineage_is_validated_with_internal_source_mapping():
+    model = parse_ddl("""
+CREATE TABLE load_product_raw (product_id varchar(20) PRIMARY KEY, product_name varchar(50));
+CREATE TABLE stg_product (product_id varchar(20) PRIMARY KEY, product_name varchar(50));
+CREATE TABLE dim_product (product_key integer PRIMARY KEY, product_id varchar(20), product_name varchar(50));
+CREATE TABLE stg_order_item (order_item_id varchar(20) PRIMARY KEY, product_id varchar(20), quantity integer, unit_price numeric(8,2));
+CREATE TABLE fact_sales (sales_key integer PRIMARY KEY, product_key integer REFERENCES dim_product(product_key), quantity integer, unit_price numeric(8,2), line_total_amount numeric(10,2));
+""")
+    data = generate_synthetic_data(model, rows_per_table=3, seed=26)
+    validation = validate_generated_data(model, data, 3)
+    assert validation["status"] in {"passed", "passed_with_warnings"}
+    data["fact_sales"][0]["product_key"] = data["dim_product"][1]["product_key"]
+    broken = validate_generated_data(model, data, 3)
+    assert broken["status"] == "failed"
+    assert any("source lineage" in err for err in broken["lineage_validation"]["errors"])

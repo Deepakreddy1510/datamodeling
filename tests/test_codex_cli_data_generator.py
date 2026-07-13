@@ -83,3 +83,21 @@ CREATE TABLE dim_method (
     assert data["__expected_rows__"] == {"dim_method": 2}
     assert len(data["dim_method"]) == 2
     assert validate_generated_data(model, data, data["__expected_rows__"])["status"] == "passed"
+
+
+def test_codex_cli_uses_stdin_dash_and_resolves_executable(tmp_path, monkeypatch):
+    calls = {}
+    monkeypatch.setattr("phase2.codex_cli_data_generator.resolve_codex_executable", lambda: "codex.cmd")
+    def fake_run(args, **kwargs):
+        calls["args"] = args
+        calls["kwargs"] = kwargs
+        class Result:
+            returncode = 0
+            stdout = '{"tables":{"demo":[]}}'
+            stderr = ""
+        return Result()
+    monkeypatch.setattr("phase2.codex_cli_data_generator.subprocess.run", fake_run)
+    generator = CodexCliDataGenerator(output_dir=tmp_path)
+    assert generator._run_codex("PROMPT") == '{"tables":{"demo":[]}}'
+    assert calls["args"] == ["codex.cmd", "exec", "-"]
+    assert calls["kwargs"]["input"] == "PROMPT"

@@ -44,7 +44,7 @@ from .semantic_context import build_semantic_context
 from .reference_data_resolver import ReferenceDataResolver
 from .lineage_mapper import business_key_columns, entity_name, shared_columns
 from .warehouse_lineage_planner import build_warehouse_lineage_plan
-from .warehouse_materializer import materialize_lineage_row
+from .warehouse_materializer import is_technical_column, materialize_lineage_row
 
 
 class SyntheticDataError(Exception):
@@ -942,7 +942,7 @@ def _apply_lineage_derivation(table, row, index, generated, lineage, stats):
         if not dim_rows:
             continue
         dim_key = mapping["dimension_key"]
-        entity_keys = mapping["business_keys"]
+        entity_keys = mapping["business_keys"] or mapping.get("dimension_business_keys", [])
         dim_row = None
         if entity_keys:
             for candidate in dim_rows:
@@ -955,7 +955,75 @@ def _apply_lineage_derivation(table, row, index, generated, lineage, stats):
                 if key in row and key in dim_row:
                     row[key] = dim_row[key]
         row[dim_key] = dim_row.get(dim_key)
+        if entity_keys:
+            row.setdefault("__lineage_business_keys__", {})[dim_key] = {key: dim_row.get(key) for key in entity_keys}
         stats.setdefault("lineage_fact_key_resolutions", set()).add(f"{table.name}.{dim_key} -> {dimension.name}.{dim_key}")
+
+
+def _warehouse_table_order(model, plan):
+    ordered = []
+    seen = set()
+    for group in [plan.raw_tables, plan.staging_tables, plan.dimension_tables, plan.fact_tables]:
+        for table in group:
+            if table.name not in seen:
+                ordered.append(table)
+                seen.add(table.name)
+    for table in table_generation_order(model):
+        if table.name not in seen:
+            ordered.append(table)
+            seen.add(table.name)
+    return ordered
+
+
+def _source_rows_for_table(table, generated, canonical_records, plan):
+    current_entity = entity_name(table.name)
+    layers = plan.entities.get(current_entity, {})
+    if table in plan.raw_tables:
+        return canonical_records.get(current_entity, [])
+    if table in plan.staging_tables:
+        raw = layers.get("raw")
+        return generated.get(raw.name, []) if raw else canonical_records.get(current_entity, [])
+    if table in plan.dimension_tables:
+        staging = layers.get("staging")
+        raw = layers.get("raw")
+        if staging and generated.get(staging.name):
+            return generated[staging.name]
+        return generated.get(raw.name, []) if raw else canonical_records.get(current_entity, [])
+    if table in plan.fact_tables:
+        staging = layers.get("staging")
+        if staging and generated.get(staging.name):
+            return generated[staging.name]
+    return []
+
+
+def _generate_value_for_column(fake, rng, table, column, index, stats, semantic_context, reference_resolver):
+    value = _check_constraint_value(table, column, index, stats)
+    if value is None:
+        stats["fallback_columns_used"].add(f"{table.name}.{column.name}")
+        stats["fallback_to_ddl_inference_count"] += 1
+        value = _fallback_value(fake, rng, table, column, index, stats, semantic_context, reference_resolver)
+    return value
+
+
+def _generate_canonical_records(model, plan, rows_per_table, fake, rng, stats, semantic_context, reference_resolver):
+    canonical_records = {}
+    for entity, layers in plan.entities.items():
+        source_table = layers.get("raw") or layers.get("staging") or layers.get("dimension")
+        if source_table is None:
+            continue
+        rows = []
+        for index in range(1, rows_per_table + 1):
+            row = {}
+            for column in source_table.columns:
+                if column.is_primary_key:
+                    row[column.name] = _pk_value(column, index, source_table.name, stats)
+                else:
+                    row[column.name] = _generate_value_for_column(fake, rng, source_table, column, index, stats, semantic_context, reference_resolver)
+            _apply_semantic_consistency(source_table, row, index, stats)
+            _finalize_row_values(source_table, row, index, stats)
+            rows.append(row)
+        canonical_records[entity] = rows
+    return canonical_records
 
 
 def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_context=None, business_input=None):
@@ -996,30 +1064,36 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
         "date_rule_corrections": set(),
         "lineage_derivations": set(),
         "lineage_fact_key_resolutions": set(),
+        "warehouse_source_value_copies": set(),
     }
     stats.update(warehouse_plan.stats())
     for semantic in getattr(semantic_context, "column_semantics", {}).values():
         stats["semantic_types"].setdefault(semantic.semantic_type, 0)
         stats["semantic_types"][semantic.semantic_type] += 1
 
-    for table in table_generation_order(model):
+    canonical_records = _generate_canonical_records(model, warehouse_plan, rows_per_table, fake, rng, stats, semantic_context, reference_resolver)
+    stats["canonical_record_groups"] = sorted(canonical_records.keys())
+
+    for table in _warehouse_table_order(model, warehouse_plan):
         _detect_constraint_capacity(table, rows_per_table)
         rows = []
         seen_unique = defaultdict(set)
         seen_primary_keys = set()
+        source_rows = _source_rows_for_table(table, generated, canonical_records, warehouse_plan)
         for index in range(1, rows_per_table + 1):
             row = {}
+            source_row = source_rows[(index - 1) % len(source_rows)] if source_rows else {}
             for column in table.columns:
                 if column.max_length and column.name not in stats["length_limited_columns"]:
                     stats["length_limited_columns"].append(column.name)
                 if column.is_primary_key:
                     row[column.name] = _pk_value(column, index, table.name, stats)
                     continue
-                value = _check_constraint_value(table, column, index, stats)
-                if value is None:
-                    stats["fallback_columns_used"].add(f"{table.name}.{column.name}")
-                    stats["fallback_to_ddl_inference_count"] += 1
-                    value = _fallback_value(fake, rng, table, column, index, stats, semantic_context, reference_resolver)
+                if column.name in source_row and not is_technical_column(column.name):
+                    value = source_row[column.name]
+                    stats.setdefault("warehouse_source_value_copies", set()).add(f"{table.name}.{column.name}")
+                else:
+                    value = _generate_value_for_column(fake, rng, table, column, index, stats, semantic_context, reference_resolver)
                 row[column.name] = value
             for fk in table.foreign_keys:
                 parent = table_map[fk.parent_table.lower()]
@@ -1054,5 +1128,6 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
     stats["date_rule_corrections"] = sorted(stats["date_rule_corrections"])
     stats["lineage_derivations"] = sorted(stats["lineage_derivations"])
     stats["lineage_fact_key_resolutions"] = sorted(stats["lineage_fact_key_resolutions"])
+    stats["warehouse_source_value_copies"] = sorted(stats["warehouse_source_value_copies"])
     generated["__stats__"] = stats
     return generated

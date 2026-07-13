@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 
+from codex_runner import CodexRunnerError, resolve_codex_executable
 from .warehouse_lineage_planner import build_warehouse_lineage_plan
 from .synthetic_data_generator import finalize_generated_value, table_generation_order, _apply_lineage_derivation, _finalize_row_values
 
@@ -106,14 +107,16 @@ class CodexCliDataGenerator:
 
     def _run_codex(self, prompt):
         try:
+            executable = resolve_codex_executable() if self.executable == "codex" else self.executable
             result = subprocess.run(
-                [self.executable, "exec", prompt],
+                [executable, "exec", "-"],
+                input=prompt,
                 text=True,
                 capture_output=True,
                 timeout=self.timeout_seconds,
                 check=False,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except (CodexRunnerError, OSError, subprocess.TimeoutExpired) as exc:
             raise CodexCliGenerationError(f"Codex CLI generation failed: {exc}") from exc
         if result.returncode != 0:
             stderr = (result.stderr or "").strip()
@@ -129,8 +132,8 @@ class CodexCliDataGenerator:
             "Act like a senior data architect designing a connected analytical warehouse.",
             "Return JSON only. Do not include markdown, explanations, comments, or code fences.",
             "Required JSON shape: {\"tables\": {\"table_name\": [{\"column_name\": \"value\"}]}}.",
-            f"Generate exactly {rows_per_table} rows for table {table.name}.",
-            "Use the target table and constraints below. Do not invent extra columns.",
+            f"Generate exactly {rows_per_table} canonical/source-aligned row objects for the current warehouse materialization target {table.name}.",
+            "Use the target schema and constraints below. Do not invent extra columns or disconnected final-table values.",
             "Warehouse-lineage rules:",
             "- Treat raw/load rows as source records.",
             "- Staging rows must be derived from raw/load rows when source context exists.",
