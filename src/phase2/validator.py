@@ -2,6 +2,9 @@ from datetime import date, datetime, time as dt_time
 from decimal import Decimal, InvalidOperation
 import json
 import re
+from .semantic_context import build_semantic_context
+from .semantic_quality_validator import validate_semantic_quality
+from .lineage_validator import validate_lineage
 
 
 
@@ -74,7 +77,7 @@ def _is_json_serializable(value):
     except (TypeError, ValueError):
         return False
 
-def validate_generated_data(model, data, expected_rows):
+def validate_generated_data(model, data, expected_rows, semantic_context=None, business_input=None):
     errors = []
     data_type_errors = []
     constraint_errors = []
@@ -88,8 +91,9 @@ def validate_generated_data(model, data, expected_rows):
 
     for table in model.tables:
         rows = data.get(table.name, [])
-        if len(rows) != expected_rows:
-            errors.append(f"{table.name}: expected {expected_rows} rows, found {len(rows)}.")
+        expected_count = expected_rows.get(table.name, expected_rows) if isinstance(expected_rows, dict) else expected_rows
+        if len(rows) != expected_count:
+            errors.append(f"{table.name}: expected {expected_count} rows, found {len(rows)}.")
         for column in table.columns:
             if column.max_length:
                 length_checks.append(f"{table.name}.{column.name} <= {column.max_length}")
@@ -166,6 +170,13 @@ def validate_generated_data(model, data, expected_rows):
                 if child_key not in parent_keys:
                     errors.append(f"{table.name}: foreign key {fk.child_columns} value {child_key} not found in {parent.name}.")
                     break
+    if semantic_context is None:
+        semantic_context = build_semantic_context(business_input or {}, model)
+    semantic_quality = validate_semantic_quality(model, data, semantic_context)
+    semantic_placeholder_errors = semantic_quality.get("errors", [])
+    errors.extend(semantic_placeholder_errors)
+    lineage_validation = validate_lineage(model, data)
+    errors.extend(lineage_validation.get("errors", []))
     errors.extend(data_type_errors)
     errors.extend(constraint_errors)
     status = "failed" if errors else ("passed_with_warnings" if skipped_fk_like_columns or placeholder_warnings else "passed")
@@ -180,5 +191,8 @@ def validate_generated_data(model, data, expected_rows):
         "data_type_errors": data_type_errors,
         "constraint_errors": constraint_errors,
         "placeholder_warnings": placeholder_warnings,
+        "semantic_placeholder_errors": semantic_placeholder_errors,
+        "semantic_placeholder_checked_values": semantic_quality.get("checked_values", 0),
+        "lineage_validation": lineage_validation,
         "row_count_summary": {table.name: len(data.get(table.name, [])) for table in model.tables},
     }
