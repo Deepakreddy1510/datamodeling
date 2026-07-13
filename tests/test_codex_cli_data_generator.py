@@ -18,18 +18,19 @@ CREATE TABLE dim_store (
 );
 """)
     generator = CodexCliDataGenerator(output_dir=tmp_path)
-    prompt = generator.build_prompt(
+    from phase2.warehouse_lineage_planner import build_warehouse_lineage_plan
+    prompt = generator.build_canonical_prompt(
         model=model,
-        table=model.tables[0],
         business_input={"reference_data": {"cities": ["London", "Paris"], "brands": ["North", "South"]}, "postgres_password": "secret"},
         ddl_text="CREATE TABLE dim_store (...);",
         rows_per_table=2,
-        generated_so_far={},
+        warehouse_plan=build_warehouse_lineage_plan(model),
     )
     assert "London" in prompt and "Paris" in prompt
     assert "North" in prompt and "South" in prompt
-    assert "City values must come only from YAML cities" in prompt
-    assert "Brand values must come only from YAML brands" in prompt
+    assert "canonical_records" in prompt
+    assert "Python will deterministically materialize" in prompt
+    assert "Do not generate final raw, staging, dimension, or fact tables independently" in prompt
     assert "secret" not in prompt
 
 
@@ -57,7 +58,7 @@ CREATE TABLE dim_customer (
 );
 """)
     def fake_run(_prompt):
-        return '{"tables":{"dim_customer":[{"customer_id":"1","status":"Bad","amount":"12.30","active_flag":"true"}]}}'
+        return '{"canonical_records":{"customer":[{"customer_id":"1","status":"Bad","amount":"12.30","active_flag":"true"}]}}'
     generator = CodexCliDataGenerator(output_dir=tmp_path)
     monkeypatch.setattr(generator, "_run_codex", fake_run)
     data = generator.generate_tables(model=model, business_input={}, ddl_text="", rows_per_table=1)
@@ -76,7 +77,7 @@ CREATE TABLE dim_method (
 );
 """)
     def fake_run(_prompt):
-        return '{"tables":{"dim_method":[{"method":"Card"},{"method":"Cash"}]}}'
+        return '{"canonical_records":{"method":[{"method":"Card"},{"method":"Cash"}]}}'
     generator = CodexCliDataGenerator(output_dir=tmp_path)
     monkeypatch.setattr(generator, "_run_codex", fake_run)
     data = generator.generate_tables(model=model, business_input={}, ddl_text="", rows_per_table=10)

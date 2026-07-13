@@ -119,7 +119,7 @@ def test_canonical_records_are_extracted_from_source_layers():
     from phase2.canonical_record_generator import CanonicalRecordGenerator
     model = _lineage_model()
     data = generate_synthetic_data(model, rows_per_table=2, seed=25)
-    canonical = CanonicalRecordGenerator(model).from_generated_sources(data)
+    canonical = CanonicalRecordGenerator(model).from_python_generation(data)
     assert "item" in canonical
     assert canonical["item"] == data["load_item_raw"]
 

@@ -45,6 +45,7 @@ from .reference_data_resolver import ReferenceDataResolver
 from .lineage_mapper import business_key_columns, entity_name, shared_columns
 from .warehouse_lineage_planner import build_warehouse_lineage_plan
 from .warehouse_materializer import is_technical_column, materialize_lineage_row
+from .canonical_record_generator import CanonicalRecordGenerator
 
 
 class SyntheticDataError(Exception):
@@ -943,10 +944,12 @@ def _apply_lineage_derivation(table, row, index, generated, lineage, stats):
             continue
         dim_key = mapping["dimension_key"]
         entity_keys = mapping["business_keys"] or mapping.get("dimension_business_keys", [])
+        source_lineage = row.get("__source_lineage__", {})
+        source_row = source_lineage.get("source_row", {}) if isinstance(source_lineage, dict) else {}
         dim_row = None
         if entity_keys:
             for candidate in dim_rows:
-                if all(row.get(key) == candidate.get(key) for key in entity_keys):
+                if all((source_row.get(key, row.get(key)) == candidate.get(key)) for key in entity_keys):
                     dim_row = candidate
                     break
         if dim_row is None:
@@ -956,7 +959,12 @@ def _apply_lineage_derivation(table, row, index, generated, lineage, stats):
                     row[key] = dim_row[key]
         row[dim_key] = dim_row.get(dim_key)
         if entity_keys:
-            row.setdefault("__lineage_business_keys__", {})[dim_key] = {key: dim_row.get(key) for key in entity_keys}
+            row.setdefault("__lineage_business_keys__", {})[dim_key] = {
+                "source_table": source_lineage.get("source_table"),
+                "dimension_table": dimension.name,
+                "resolved_dimension_key": dim_row.get(dim_key),
+                "business_keys": {key: source_row.get(key, dim_row.get(key)) for key in entity_keys},
+            }
         stats.setdefault("lineage_fact_key_resolutions", set()).add(f"{table.name}.{dim_key} -> {dimension.name}.{dim_key}")
 
 
@@ -990,7 +998,7 @@ def _source_rows_for_table(table, generated, canonical_records, plan):
             return generated[staging.name]
         return generated.get(raw.name, []) if raw else canonical_records.get(current_entity, [])
     if table in plan.fact_tables:
-        staging = layers.get("staging")
+        staging = plan.fact_sources.get(table.name) or layers.get("staging")
         if staging and generated.get(staging.name):
             return generated[staging.name]
     return []
@@ -1005,28 +1013,15 @@ def _generate_value_for_column(fake, rng, table, column, index, stats, semantic_
     return value
 
 
-def _generate_canonical_records(model, plan, rows_per_table, fake, rng, stats, semantic_context, reference_resolver):
-    canonical_records = {}
-    for entity, layers in plan.entities.items():
-        source_table = layers.get("raw") or layers.get("staging") or layers.get("dimension")
-        if source_table is None:
-            continue
-        rows = []
-        for index in range(1, rows_per_table + 1):
-            row = {}
-            for column in source_table.columns:
-                if column.is_primary_key:
-                    row[column.name] = _pk_value(column, index, source_table.name, stats)
-                else:
-                    row[column.name] = _generate_value_for_column(fake, rng, source_table, column, index, stats, semantic_context, reference_resolver)
-            _apply_semantic_consistency(source_table, row, index, stats)
-            _finalize_row_values(source_table, row, index, stats)
-            rows.append(row)
-        canonical_records[entity] = rows
-    return canonical_records
+def _canonical_value_factory(fake, rng, stats, semantic_context, reference_resolver):
+    def factory(table, column, index):
+        if column.is_primary_key:
+            return _pk_value(column, index, table.name, stats)
+        return _generate_value_for_column(fake, rng, table, column, index, stats, semantic_context, reference_resolver)
+    return factory
 
 
-def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_context=None, business_input=None):
+def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_context=None, business_input=None, canonical_records_override=None):
     fake = Faker()
     Faker.seed(seed)
     rng = random.Random(seed)
@@ -1071,7 +1066,15 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
         stats["semantic_types"].setdefault(semantic.semantic_type, 0)
         stats["semantic_types"][semantic.semantic_type] += 1
 
-    canonical_records = _generate_canonical_records(model, warehouse_plan, rows_per_table, fake, rng, stats, semantic_context, reference_resolver)
+    if canonical_records_override is None:
+        canonical_generator = CanonicalRecordGenerator(model, warehouse_plan)
+        canonical_records = canonical_generator.generate(
+            rows_per_table,
+            _canonical_value_factory(fake, rng, stats, semantic_context, reference_resolver),
+            lambda table, row, index: (_apply_semantic_consistency(table, row, index, stats), _finalize_row_values(table, row, index, stats)),
+        )
+    else:
+        canonical_records = canonical_records_override
     stats["canonical_record_groups"] = sorted(canonical_records.keys())
 
     for table in _warehouse_table_order(model, warehouse_plan):
@@ -1083,6 +1086,13 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
         for index in range(1, rows_per_table + 1):
             row = {}
             source_row = source_rows[(index - 1) % len(source_rows)] if source_rows else {}
+            if table in warehouse_plan.fact_tables and source_row:
+                source_table = warehouse_plan.fact_sources.get(table.name)
+                if source_table:
+                    row["__source_lineage__"] = {
+                        "source_table": source_table.name,
+                        "source_row": dict(source_row),
+                    }
             for column in table.columns:
                 if column.max_length and column.name not in stats["length_limited_columns"]:
                     stats["length_limited_columns"].append(column.name)
@@ -1108,7 +1118,7 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
             materialize_lineage_row(table, row, index, generated, warehouse_plan, stats, _finalize_row_values, _apply_lineage_derivation)
             _enforce_primary_key(table, row, seen_primary_keys, index, stats)
             _enforce_unique_constraints(table, row, seen_unique, index, stats, generated)
-            materialize_lineage_row(table, row, index, generated, warehouse_plan, stats, _finalize_row_values, _apply_lineage_derivation)
+            _finalize_row_values(table, row, index, stats)
             rows.append(row)
         generated[table.name] = rows
     _finalize_calculations(model, generated, stats)

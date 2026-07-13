@@ -103,7 +103,8 @@ def validate_lineage(model, data):
             dim_row = dim_by_surrogate.get(fact_row.get(dim_key))
             if not dim_row:
                 continue
-            lineage_business_keys = fact_row.get("__lineage_business_keys__", {}).get(dim_key, {})
+            lineage_payload = fact_row.get("__lineage_business_keys__", {}).get(dim_key, {})
+            lineage_business_keys = lineage_payload.get("business_keys", lineage_payload) if isinstance(lineage_payload, dict) else {}
             if lineage_business_keys:
                 for key, expected_value in lineage_business_keys.items():
                     if dim_row.get(key) != expected_value:

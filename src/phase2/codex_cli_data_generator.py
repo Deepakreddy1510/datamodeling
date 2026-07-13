@@ -9,7 +9,9 @@ import subprocess
 
 from codex_runner import CodexRunnerError, resolve_codex_executable
 from .warehouse_lineage_planner import build_warehouse_lineage_plan
-from .synthetic_data_generator import finalize_generated_value, table_generation_order, _apply_lineage_derivation, _finalize_row_values
+from .canonical_record_generator import CanonicalRecordGenerator
+from .semantic_context import build_semantic_context
+from .synthetic_data_generator import finalize_generated_value, generate_synthetic_data, table_generation_order, _apply_lineage_derivation, _finalize_row_values
 
 
 class CodexCliGenerationError(Exception):
@@ -74,36 +76,47 @@ class CodexCliDataGenerator:
             "lineage_derivations": set(),
             "lineage_fact_key_resolutions": set(),
         })
-        for table in table_generation_order(model):
-            row_count = self._row_count_for_table(table, rows_per_table)
-            expected_rows[table.name] = row_count
-            prompt = self.build_prompt(
-                model=model,
-                table=table,
-                business_input=business_input,
-                ddl_text=ddl_text,
-                rows_per_table=row_count,
-                generated_so_far=generated,
-                warehouse_plan=warehouse_plan,
-            )
-            prompt_path = self.output_dir / f"{_safe_filename(table.name)}_prompt.txt"
-            prompt_path.write_text(prompt, encoding="utf-8")
-            raw = self._run_codex(prompt)
-            raw_path = self.output_dir / f"{_safe_filename(table.name)}_raw_output.txt"
-            raw_path.write_text(raw, encoding="utf-8")
-            parsed = self.parse_json_output(raw, raw_path=self.output_dir / "codex_raw_output.txt")
-            rows = self._extract_table_rows(parsed, table.name)
-            if len(rows) != row_count:
-                raise CodexCliGenerationError(f"Codex CLI returned {len(rows)} rows for {table.name}; expected {row_count}.")
-            generated[table.name] = self._finalize_rows(table, rows, stats, generated, lineage)
-            table_json = self.output_dir / f"{_safe_filename(table.name)}.json"
-            table_json.write_text(json.dumps({"tables": {table.name: generated[table.name]}}, indent=2, default=_json_default), encoding="utf-8")
-            stats["codex_tables_generated"].append(table.name)
-            if row_count != rows_per_table:
-                stats["codex_adaptive_row_counts"][table.name] = row_count
-        generated["__stats__"] = stats
-        generated["__expected_rows__"] = expected_rows
+        prompt = self.build_canonical_prompt(model=model, business_input=business_input, ddl_text=ddl_text, rows_per_table=rows_per_table, warehouse_plan=warehouse_plan)
+        (self.output_dir / "canonical_prompt.txt").write_text(prompt, encoding="utf-8")
+        raw = self._run_codex(prompt)
+        (self.output_dir / "canonical_raw_output.txt").write_text(raw, encoding="utf-8")
+        parsed = self.parse_json_output(raw, raw_path=self.output_dir / "codex_raw_output.txt")
+        canonical_records = CanonicalRecordGenerator(model, warehouse_plan).from_codex_payload(parsed)
+        (self.output_dir / "canonical_records.json").write_text(json.dumps({"canonical_records": canonical_records}, indent=2, default=_json_default), encoding="utf-8")
+        semantic_context = build_semantic_context(business_input or {}, model)
+        expected_rows = {table.name: self._row_count_for_table(table, rows_per_table) for table in model.tables}
+        materialize_rows = min(expected_rows.values()) if expected_rows else rows_per_table
+        generated = generate_synthetic_data(
+            model,
+            rows_per_table=materialize_rows,
+            semantic_context=semantic_context,
+            business_input=business_input,
+            canonical_records_override=canonical_records,
+        )
+        generated.setdefault("__stats__", {}).update(stats)
+        generated["__stats__"]["codex_canonical_groups"] = sorted(canonical_records.keys())
+        generated["__expected_rows__"] = {table.name: len(generated.get(table.name, [])) for table in model.tables}
         return generated
+
+    def build_canonical_prompt(self, *, model, business_input, ddl_text, rows_per_table, warehouse_plan):
+        safe_business_input = _redact_for_prompt(business_input or {})
+        return "\n".join([
+            "You are a senior data architect generating canonical source/event records for a warehouse.",
+            "Return JSON only. Do not include markdown, explanations, comments, or code fences.",
+            "Required JSON shape: {\"canonical_records\": {\"entity_or_event_name\": [{\"column_name\": \"value\"}]}}.",
+            f"Generate {rows_per_table} canonical records for each source entity/event group in the warehouse lineage plan.",
+            "Do not generate final raw, staging, dimension, or fact tables independently.",
+            "Python will deterministically materialize raw/load -> staging -> dimensions -> facts from these canonical_records.",
+            "Use DDL-safe values: integer columns are integers, numeric columns are numbers, booleans are true/false, dates are ISO dates, timestamps are ISO timestamps, CHECK IN columns use allowed values only.",
+            "business_yaml_context:",
+            json.dumps(safe_business_input, indent=2, default=_json_default),
+            "warehouse_lineage_plan:",
+            json.dumps(warehouse_plan.stats(), indent=2, default=_json_default),
+            "table_schemas:",
+            json.dumps([self._table_payload(table) for table in model.tables], indent=2, default=_json_default),
+            "parsed_ddl_excerpt:",
+            ddl_text[:12000],
+        ])
 
     def _run_codex(self, prompt):
         try:
