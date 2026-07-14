@@ -83,3 +83,36 @@ CREATE TABLE dim_method (
     assert data["__expected_rows__"] == {"dim_method": 2}
     assert len(data["dim_method"]) == 2
     assert validate_generated_data(model, data, data["__expected_rows__"])["status"] == "passed"
+
+
+def test_codex_warehouse_elt_prompt_requires_raw_only_generation(tmp_path):
+    model = parse_ddl("""
+CREATE TABLE load_customer_raw (customer_id varchar(20));
+CREATE TABLE stg_customer (customer_id varchar(20));
+""")
+    generator = CodexCliDataGenerator(output_dir=tmp_path)
+    prompt = generator.build_warehouse_elt_prompt(
+        model=model,
+        business_input={"postgres_password": "secret"},
+        ddl_text="CREATE TABLE load_customer_raw (customer_id varchar(20));",
+        semantic_context=None,
+        pipeline_plan={"raw_tables": ["load_customer_raw"], "staging_tables": ["stg_customer"], "dimension_tables": [], "fact_tables": [], "lineage": {"stg_customer": ["load_customer_raw"]}},
+        rows_per_table=3,
+    )
+    assert "Generate rows only for load/raw tables" in prompt
+    assert "Do not generate staging rows independently" in prompt
+    assert "INSERT ... SELECT or WITH ... INSERT" in prompt
+    assert "CREATE TABLE" in prompt
+    assert "Do not generate CREATE TABLE" in prompt
+    assert "secret" not in prompt
+
+
+def test_codex_warehouse_elt_writes_artifacts(tmp_path, monkeypatch):
+    model = parse_ddl("CREATE TABLE load_customer_raw (customer_id varchar(20));")
+    generator = CodexCliDataGenerator(output_dir=tmp_path)
+    monkeypatch.setattr(generator, "_run_codex", lambda _prompt: '{"load_table_rows":{"load_customer_raw":[{"customer_id":"C1"}]},"staging_sql":[],"dimension_sql":[],"fact_sql":[],"assumptions":["demo"]}')
+    response = generator.generate_warehouse_elt(model=model, business_input={}, ddl_text="", semantic_context=None, pipeline_plan={"raw_tables": ["load_customer_raw"]}, rows_per_table=1)
+    assert response["load_table_rows"]["load_customer_raw"][0]["customer_id"] == "C1"
+    assert (tmp_path / "warehouse_elt_prompt.txt").exists()
+    assert (tmp_path / "warehouse_elt_raw_output.txt").exists()
+    assert (tmp_path / "warehouse_elt_sql.json").exists()

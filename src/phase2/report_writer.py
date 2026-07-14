@@ -14,7 +14,7 @@ def _overall_status(*statuses):
     return "passed"
 
 
-def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation):
+def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation, pipeline_plan=None, codex_assumptions=None, codex_sql_artifact=None, elt_execution=None, lineage_validation=None):
     stats = validation.get("generation_stats", {})
     final_status = _overall_status(validation.get("status"), "passed_with_warnings" if getattr(model, "warnings", []) else None)
     lines = [
@@ -34,6 +34,38 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     ]
     for table in model.tables:
         lines.append(f"| {table.full_name} | {len(table.columns)} | {', '.join(table.primary_key) or 'None'} | {len(table.foreign_keys)} |")
+
+    if pipeline_plan:
+        lines.extend(["", "## Warehouse Pipeline Classification", ""])
+        lines.append(f"- Raw/load tables: {', '.join(pipeline_plan.get('raw_tables', [])) or 'None'}")
+        lines.append(f"- Staging tables: {', '.join(pipeline_plan.get('staging_tables', [])) or 'None'}")
+        lines.append(f"- Dimension tables: {', '.join(pipeline_plan.get('dimension_tables', [])) or 'None'}")
+        lines.append(f"- Fact tables: {', '.join(pipeline_plan.get('fact_tables', [])) or 'None'}")
+        lines.append(f"- Other tables: {', '.join(pipeline_plan.get('other_tables', [])) or 'None'}")
+        lines.extend(["", "## Warehouse Lineage Plan", ""])
+        for target, sources in pipeline_plan.get('lineage', {}).items():
+            lines.append(f"- {target}: {', '.join(sources) or 'None'}")
+        if pipeline_plan.get('warnings'):
+            lines.extend(["", "### Pipeline Plan Warnings", ""])
+            lines.extend([f"- {warning}" for warning in pipeline_plan.get('warnings', [])])
+    if codex_assumptions is not None:
+        lines.extend(["", "## Codex ELT Assumptions", ""])
+        lines.extend([f"- {item}" for item in codex_assumptions] or ["- None"])
+    if codex_sql_artifact:
+        lines.extend(["", "## Codex SQL Artifact", "", f"- `{codex_sql_artifact}`"])
+    if elt_execution:
+        lines.extend(["", "## ELT Execution Summary", ""])
+        lines.append(f"- SQL execution status: {elt_execution.get('status', 'unknown')}")
+        lines.append(f"- Transaction status: {elt_execution.get('transaction_status', 'unknown')}")
+        lines.extend(["", "### Raw/Load Inserted Rows", "", "| Table | Rows |", "|---|---:|"])
+        for table, count in elt_execution.get('inserted_rows', {}).items():
+            lines.append(f"| {table} | {count} |")
+        lines.extend(["", "### Final Row Counts by Table", "", "| Table | Rows |", "|---|---:|"])
+        for table, count in elt_execution.get('transformed_rows', {}).items():
+            lines.append(f"| {table} | {count} |")
+    if lineage_validation:
+        lines.extend(["", "## Lineage Validation Summary", "", f"- Status: **{lineage_validation.get('status', 'unknown')}**"])
+        lines.extend([f"- {error}" for error in lineage_validation.get('errors', [])] or ["- No lineage errors."])
 
     lines.extend(["", "## Ignored Constraints / Warnings", ""])
     ignored = []
@@ -122,7 +154,7 @@ def write_postgres_report(path, load_requested, result):
     write_text(path, lines)
 
 
-def write_validation_report(path, pre_validation, post_validation=None):
+def write_validation_report(path, pre_validation, post_validation=None, lineage_validation=None):
     final_status = _overall_status(pre_validation.get("status"), post_validation.get("status") if post_validation else None)
     stats = pre_validation.get("generation_stats", {})
     lines = ["# Validation Report", "", f"- Final status: **{final_status}**", f"- DDL validation status: **{'failed' if pre_validation.get('errors') else 'passed'}**", f"- Fallback inference count: {stats.get('fallback_to_ddl_inference_count', 0)}", f"- Semantic type count: {len(stats.get('semantic_types', {}))}", f"- Placeholder warning count: {len(pre_validation.get('placeholder_warnings', []))}", f"- Semantic placeholder validation status: **{'failed' if pre_validation.get('semantic_placeholder_errors') else 'passed'}**", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
@@ -160,6 +192,21 @@ def write_validation_report(path, pre_validation, post_validation=None):
         lines.append("| None | 0 |")
     lines.extend(["", "## Unsupported Calculation Rules", ""])
     lines.extend([f"- {item}" for item in stats.get("calculation_warnings", [])] or ["- None"])
+    lines.extend(["", "## Lineage Validation", ""])
+    if lineage_validation is None:
+        lineage_validation = pre_validation.get("lineage_validation")
+    if lineage_validation is None:
+        lines.append("Lineage validation was skipped.")
+    else:
+        lines.append(f"Status: **{lineage_validation.get('status', 'unknown')}**")
+        lines.extend([f"- {item}" for item in lineage_validation.get("errors", [])] or ["- No lineage errors."])
+        if lineage_validation.get("warnings"):
+            lines.extend(["", "### Lineage Warnings", ""])
+            lines.extend([f"- {item}" for item in lineage_validation.get("warnings", [])])
+        if lineage_validation.get("checks"):
+            lines.extend(["", "### Lineage Checks", ""])
+            lines.extend([f"- {item}" for item in lineage_validation.get("checks", [])])
+
     lines.extend(["", "## PostgreSQL Validation", ""])
     if post_validation is None:
         lines.append("PostgreSQL validation was skipped because no database load was requested.")

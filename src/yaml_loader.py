@@ -1,6 +1,13 @@
 from pathlib import Path
+import importlib.util
 
-import yaml
+if importlib.util.find_spec("yaml") is not None:
+    import yaml
+    _safe_load = yaml.safe_load
+    _YamlError = yaml.YAMLError
+else:
+    from yaml_fallback import YAMLError as _YamlError
+    from yaml_fallback import safe_load as _safe_load
 
 
 class YamlLoaderError(Exception):
@@ -24,8 +31,8 @@ def load_yaml_file(path):
         raise YamlLoaderError("Input YAML file is empty.")
 
     try:
-        data = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
+        data = _safe_load(text)
+    except _YamlError as exc:
         raise YamlLoaderError(f"Invalid YAML syntax: {exc}") from exc
 
     if data is None:

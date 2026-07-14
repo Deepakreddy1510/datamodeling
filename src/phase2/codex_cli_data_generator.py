@@ -49,7 +49,7 @@ class CodexCliDataGenerator:
     def __init__(self, output_dir="output/codex_generated_data", timeout_seconds=300, executable="codex"):
         self.output_dir = Path(output_dir)
         self.timeout_seconds = timeout_seconds
-        self.executable = resolve_codex_executable() if executable == "codex" else executable
+        self.executable = executable
 
     def generate_tables(self, *, model, business_input, ddl_text, rows_per_table, allow_fallback=False):
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -92,10 +92,101 @@ class CodexCliDataGenerator:
         generated["__expected_rows__"] = expected_rows
         return generated
 
+
+    def generate_warehouse_elt(self, *, model, business_input, ddl_text, semantic_context, pipeline_plan, rows_per_table):
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        prompt = self.build_warehouse_elt_prompt(
+            model=model,
+            business_input=business_input,
+            ddl_text=ddl_text,
+            semantic_context=semantic_context,
+            pipeline_plan=pipeline_plan,
+            rows_per_table=rows_per_table,
+        )
+        prompt_path = self.output_dir / "warehouse_elt_prompt.txt"
+        prompt_path.write_text(prompt, encoding="utf-8")
+        raw = self._run_codex(prompt)
+        raw_path = self.output_dir / "warehouse_elt_raw_output.txt"
+        raw_path.write_text(raw, encoding="utf-8")
+        parsed = self.parse_json_output(raw, raw_path=raw_path)
+        if not isinstance(parsed, dict):
+            raise CodexCliGenerationError("Codex CLI ETL response must be a JSON object.")
+        sql_artifact = self.output_dir / "warehouse_elt_sql.json"
+        sql_artifact.write_text(json.dumps({
+            "staging_sql": parsed.get("staging_sql", []),
+            "dimension_sql": parsed.get("dimension_sql", []),
+            "fact_sql": parsed.get("fact_sql", []),
+            "assumptions": parsed.get("assumptions", []),
+        }, indent=2, default=_json_default), encoding="utf-8")
+        return parsed
+
+    def build_warehouse_elt_prompt(self, *, model, business_input, ddl_text, semantic_context, pipeline_plan, rows_per_table):
+        safe_business_input = _redact_for_prompt(business_input or {})
+        model_payload = {"tables": [self._table_payload(table) for table in model.tables]}
+        semantic_payload = {
+            "business_name": getattr(semantic_context, "business_name", ""),
+            "business_type": getattr(semantic_context, "business_type", ""),
+            "domain_terms": getattr(semantic_context, "domain_terms", []),
+            "entity_terms": getattr(semantic_context, "entity_terms", []),
+            "table_roles": getattr(semantic_context, "table_roles", {}),
+            "column_semantics": [
+                {
+                    "table_name": semantic.table_name,
+                    "column_name": semantic.column_name,
+                    "semantic_type": semantic.semantic_type,
+                    "confidence": semantic.confidence,
+                    "reasons": semantic.reasons,
+                }
+                for semantic in getattr(semantic_context, "column_semantics", {}).values()
+            ],
+        }
+        return "\n".join([
+            "You are a senior PostgreSQL data warehouse engineer.",
+            "Generate connected synthetic data using a real ELT flow.",
+            "Return strict JSON only. No markdown. No explanation outside JSON.",
+            "Expected JSON shape:",
+            json.dumps({
+                "load_table_rows": {"<raw_or_load_table_name>": [{"<column_name>": "<value>"}]},
+                "staging_sql": [],
+                "dimension_sql": [],
+                "fact_sql": [],
+                "assumptions": [],
+            }, indent=2),
+            "Rules:",
+            "1. Generate rows only for load/raw tables.",
+            "2. Do not generate staging rows independently.",
+            "3. Do not generate dimension rows independently.",
+            "4. Do not generate fact rows independently.",
+            "5. Generate PostgreSQL INSERT ... SELECT or WITH ... INSERT transformation SQL for staging tables from raw/load tables.",
+            "6. Generate PostgreSQL INSERT ... SELECT or WITH ... INSERT transformation SQL for dimensions from staging tables.",
+            "7. Generate PostgreSQL INSERT ... SELECT or WITH ... INSERT transformation SQL for facts from staging/event tables joined to dimensions.",
+            "8. Facts must resolve surrogate keys from dimensions through business keys.",
+            "9. Respect PostgreSQL data types.",
+            "10. Respect CHECK constraints.",
+            "11. Respect primary keys.",
+            "12. Respect foreign keys.",
+            "13. Respect nullable columns.",
+            "14. Do not generate CREATE TABLE, DROP TABLE, ALTER TABLE, CREATE SCHEMA, DROP SCHEMA, DELETE, TRUNCATE, GRANT, REVOKE, or database administration SQL.",
+            "15. Do not generate CREATE USER, CREATE ROLE, DROP DATABASE, DROP SCHEMA, COPY PROGRAM, SECURITY DEFINER, or ALTER SYSTEM SQL.",
+            "16. Use only INSERT ... SELECT or WITH ... INSERT ... SELECT transformation SQL.",
+            "17. Use only known parsed model tables. Do not target unknown schemas or unknown tables.",
+            f"Generate approximately {rows_per_table} source rows per raw/load table unless table constraints require fewer rows.",
+            "business_yaml_context:",
+            json.dumps(safe_business_input, indent=2, default=_json_default),
+            "parsed_ddl_model:",
+            json.dumps(model_payload, indent=2, default=_json_default),
+            "semantic_context:",
+            json.dumps(semantic_payload, indent=2, default=_json_default),
+            "warehouse_pipeline_plan:",
+            json.dumps(pipeline_plan, indent=2, default=_json_default),
+            "phase1_postgresql_ddl:",
+            ddl_text[:20000],
+        ])
+
     def _run_codex(self, prompt):
         try:
             result = subprocess.run(
-                [self.executable, "exec", "-"],
+                [resolve_codex_executable() if self.executable == "codex" else self.executable, "exec", "-"],
                 text=True,
                 input=prompt,
                 capture_output=True,
