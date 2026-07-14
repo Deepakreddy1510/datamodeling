@@ -13,6 +13,43 @@ CREATE TABLE child (id integer PRIMARY KEY, parent_id integer REFERENCES parent(
     assert any("foreign key" in error for error in result["errors"])
 
 
+def test_validator_skips_nullable_fk_values():
+    model = parse_ddl("""
+CREATE TABLE parent (id integer PRIMARY KEY);
+CREATE TABLE child (id integer PRIMARY KEY, parent_id integer REFERENCES parent(id));
+""")
+    data = {
+        "parent": [{"id": 1}],
+        "child": [{"id": 1, "parent_id": None}, {"id": 2, "parent_id": ""}],
+    }
+    result = validate_generated_data(model, data, expected_rows={"parent": 1, "child": 2})
+    assert result["status"] == "passed"
+    assert not result["errors"]
+
+
+def test_validator_skips_composite_fk_when_any_component_is_nullable_but_rejects_non_null_value():
+    model = parse_ddl("""
+CREATE TABLE parent (id_a integer, id_b integer, PRIMARY KEY (id_a, id_b));
+CREATE TABLE child (
+    id integer PRIMARY KEY,
+    parent_a integer,
+    parent_b integer,
+    FOREIGN KEY (parent_a, parent_b) REFERENCES parent(id_a, id_b)
+);
+""")
+    data = {
+        "parent": [{"id_a": 1, "id_b": 2}],
+        "child": [
+            {"id": 1, "parent_a": 1, "parent_b": None},
+            {"id": 2, "parent_a": 999, "parent_b": 999},
+        ],
+    }
+    result = validate_generated_data(model, data, expected_rows={"parent": 1, "child": 2})
+    assert result["status"] == "failed"
+    assert any("value (999, 999) not found" in error for error in result["errors"])
+    assert not any("value (1, None) not found" in error for error in result["errors"])
+
+
 def test_validator_detects_unique_violation():
     model = parse_ddl("CREATE TABLE item (id integer PRIMARY KEY, code varchar(10) UNIQUE);")
     data = {"item": [{"id": 1, "code": "A"}, {"id": 2, "code": "A"}]}

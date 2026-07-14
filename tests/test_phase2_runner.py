@@ -52,3 +52,17 @@ CREATE TABLE fact_sales (
     assert phase2_runner.main() == 0
     assert excel_path.exists()
     assert "Final status: **passed" in (tmp_path / "validation_report.md").read_text(encoding="utf-8")
+
+
+def test_phase2_runner_generation_engine_defaults_to_python(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["phase2_runner.py", "--yaml", "input.yaml"])
+    args = phase2_runner.parse_args()
+    assert args.generation_engine == "python"
+
+
+def test_phase2_runner_parses_codex_generation_options(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["phase2_runner.py", "--yaml", "input.yaml", "--generation-engine", "codex-cli", "--allow-generator-fallback", "--codex-timeout-seconds", "12"])
+    args = phase2_runner.parse_args()
+    assert args.generation_engine == "codex-cli"
+    assert args.allow_generator_fallback is True
+    assert args.codex_timeout_seconds == 12

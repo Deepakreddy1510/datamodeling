@@ -78,10 +78,16 @@ def _parse_check_expression(expression, name=None):
     text = expression.strip()
     if text.upper().startswith("CHECK"):
         text = text[text.find("(") + 1: text.rfind(")")].strip()
-    in_match = re.fullmatch(r'([\w"]+)\s+IN\s*\((.+)\)', text, re.IGNORECASE | re.DOTALL)
+    normalized_text = re.sub(r"::\s*\w+(?:\[\])?", "", text)
+    normalized_text = re.sub(r"\(\s*([\w\"]+)\s*\)", r"\1", normalized_text)
+    in_match = re.fullmatch(r'([\w"]+)\s+IN\s*\((.+)\)', normalized_text, re.IGNORECASE | re.DOTALL)
     if in_match:
         values = [item.strip().strip("'").strip('"') for item in _split_top_level_commas(in_match.group(2))]
         return CheckConstraint(expression=text, column=_clean_identifier(in_match.group(1)), operator="IN", values=values, name=name, supported=True)
+    any_match = re.fullmatch(r'([\w"]+)\s*=\s*ANY\s*\(\s*ARRAY\s*\[(.+)\]\s*\)', normalized_text, re.IGNORECASE | re.DOTALL)
+    if any_match:
+        values = [item.strip().strip("'").strip('"') for item in _split_top_level_commas(any_match.group(2))]
+        return CheckConstraint(expression=text, column=_clean_identifier(any_match.group(1)), operator="IN", values=values, name=name, supported=True)
     between_match = re.fullmatch(r'([\w"]+)\s+BETWEEN\s+(-?\d+(?:\.\d+)?)\s+AND\s+(-?\d+(?:\.\d+)?)', text, re.IGNORECASE)
     if between_match:
         return CheckConstraint(expression=text, column=_clean_identifier(between_match.group(1)), operator="BETWEEN", min_value=between_match.group(2), max_value=between_match.group(3), name=name, supported=True)
