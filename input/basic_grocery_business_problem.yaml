@@ -1,0 +1,151 @@
+business_name: FreshCart Online Grocery
+
+business_type: Online Grocery Delivery
+
+target_database: PostgreSQL
+
+business_description: >
+  FreshCart is an online grocery delivery business where customers use a mobile app
+  or website to browse grocery products, place orders, make payments, and receive
+  deliveries from nearby stores. The business wants to improve visibility into
+  sales, customer behavior, product demand, payment success, and delivery performance.
+
+model_purpose: >
+  Create a data model that helps the business analyze customer orders, product sales,
+  store performance, payment status, and delivery outcomes. The model should support
+  business reporting, operational analysis, and synthetic data generation for testing.
+
+main_business_processes:
+  - Customer registration and profile management
+  - Product browsing and catalog management
+  - Order placement
+  - Order item selection
+  - Payment processing
+  - Store fulfillment
+  - Delivery tracking
+  - Customer order history analysis
+
+key_business_entities:
+  - entity_name: Customer
+    description: A person who registers on the FreshCart app or website and places grocery orders.
+
+  - entity_name: Product
+    description: A grocery item available for customers to purchase.
+
+  - entity_name: Store
+    description: A store or fulfillment location that prepares customer orders.
+
+  - entity_name: Order
+    description: A purchase request placed by a customer.
+
+  - entity_name: Order Item
+    description: A product line item inside a customer order.
+
+  - entity_name: Payment
+    description: Payment information related to a customer order.
+
+  - entity_name: Delivery
+    description: Delivery tracking details for an order.
+
+business_relationships:
+  - relationship_name: Customer places Orders
+    description: One customer can place many orders.
+
+  - relationship_name: Store fulfills Orders
+    description: One store can fulfill many orders.
+
+  - relationship_name: Order contains Order Items
+    description: One order can contain many order items.
+
+  - relationship_name: Product appears in Order Items
+    description: One product can appear in many order items.
+
+  - relationship_name: Order has Payment
+    description: Each order should have payment information.
+
+  - relationship_name: Order has Delivery
+    description: Each order should have delivery tracking information.
+
+entity_attributes:
+  Customer:
+    - customer_id
+    - customer_name
+    - email
+    - phone
+    - city
+    - customer_segment
+    - signup_date
+
+  Product:
+    - product_id
+    - product_name
+    - product_category
+    - brand
+    - unit_price
+    - is_active
+
+  Store:
+    - store_id
+    - store_name
+    - city
+    - region
+    - store_type
+
+  Order:
+    - order_id
+    - customer_id
+    - store_id
+    - order_date
+    - order_status
+    - order_total_amount
+
+  Order Item:
+    - order_item_id
+    - order_id
+    - product_id
+    - quantity
+    - unit_price
+    - line_total_amount
+
+  Payment:
+    - payment_id
+    - order_id
+    - payment_method
+    - payment_status
+    - payment_amount
+    - payment_date
+
+  Delivery:
+    - delivery_id
+    - order_id
+    - delivery_partner
+    - delivery_status
+    - promised_delivery_time
+    - actual_delivery_time
+    - delivery_delay_minutes
+
+reporting_requirements:
+  - report_name: Daily Sales Report
+    description: Show daily order count, sales amount, and quantity sold.
+
+  - report_name: Product Sales Report
+    description: Show sales by product, category, and brand.
+
+  - report_name: Customer Segment Report
+    description: Show orders and sales by customer segment and city.
+
+  - report_name: Payment Status Report
+    description: Show successful, failed, pending, and refunded payments.
+
+  - report_name: Delivery Performance Report
+    description: Show delivery status, delayed orders, and average delivery delay.
+
+expected_output:
+  - Conceptual data model
+  - Logical data model
+  - Physical PostgreSQL data model
+  - SQL DDL scripts
+  - Table relationships
+  - Synthetic data generation support
+  - Excel output with sample synthetic data
+  - PostgreSQL loading support

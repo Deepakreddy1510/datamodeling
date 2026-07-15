@@ -1,0 +1,245 @@
+business_name: Air India Cabin Capacity Optimization
+
+business_type: Airline Revenue Management and Cabin Capacity Optimization
+
+target_database: PostgreSQL
+
+business_description: >
+  Air India operates domestic and international flights using different aircraft
+  and cabin configurations. Passengers book seats through multiple channels and
+  fare categories across Economy, Premium Economy, and Business Class. The business
+  wants to improve visibility into route demand, booking behavior, ticket revenue,
+  aircraft utilization, cabin load factor, cancellations, refunds, and seasonal
+  travel patterns so that seat capacity can be allocated more effectively.
+
+model_purpose: >
+  Create a data model that helps the business analyze flight bookings, route
+  performance, cabin demand, ticket pricing, passenger volume, aircraft usage,
+  cancellations, refunds, and cabin utilization. The model should support revenue
+  analysis, demand forecasting, operational reporting, cabin-capacity optimization,
+  synthetic data generation, Excel output, and PostgreSQL loading.
+
+main_business_processes:
+  - Airport and route management
+  - Aircraft registration and fleet management
+  - Aircraft cabin configuration management
+  - Flight scheduling
+  - Passenger booking
+  - Cabin seat allocation
+  - Fare and ticket pricing
+  - Booking cancellation and refund processing
+  - Flight cabin inventory tracking
+  - Revenue tracking
+  - Route demand analysis
+  - Aircraft utilization analysis
+  - Cabin capacity recommendation
+
+key_business_entities:
+  - entity_name: Airport
+    description: An airport used as the origin or destination of a flight route.
+
+  - entity_name: Route
+    description: A travel path between an origin airport and a destination airport.
+
+  - entity_name: Aircraft
+    description: An aircraft in the Air India fleet that operates scheduled flights.
+
+  - entity_name: Aircraft Configuration
+    description: The effective cabin seat configuration assigned to an aircraft.
+
+  - entity_name: Flight
+    description: A scheduled flight operating on a route using an aircraft and cabin configuration.
+
+  - entity_name: Cabin Class
+    description: A travel cabin category such as Economy, Premium Economy, or Business Class.
+
+  - entity_name: Booking
+    description: A passenger reservation made for a specific flight and cabin class.
+
+  - entity_name: Flight Cabin Inventory
+    description: Cabin-level seat availability and utilization for a particular flight.
+
+business_relationships:
+  - relationship_name: Airport defines Routes
+    description: One airport can be the origin or destination of many routes.
+
+  - relationship_name: Route contains Flights
+    description: One route can have many scheduled flights.
+
+  - relationship_name: Aircraft has Configurations
+    description: One aircraft can have multiple effective-dated cabin configurations over time.
+
+  - relationship_name: Aircraft operates Flights
+    description: One aircraft can operate many flights on different dates.
+
+  - relationship_name: Aircraft Configuration applies to Flights
+    description: Each flight uses one aircraft cabin configuration that belongs to the assigned aircraft.
+
+  - relationship_name: Flight belongs to Route
+    description: Each flight operates on one route.
+
+  - relationship_name: Flight has Bookings
+    description: One flight can have many passenger bookings.
+
+  - relationship_name: Cabin Class appears in Bookings
+    description: One cabin class can be selected by many bookings.
+
+  - relationship_name: Flight has Cabin Inventory
+    description: One flight should have one cabin inventory record for each available cabin class.
+
+  - relationship_name: Cabin Class appears in Flight Cabin Inventory
+    description: One cabin class can appear in the cabin inventory of many flights.
+
+entity_attributes:
+  Airport:
+    - airport_id
+    - airport_code
+    - airport_name
+    - city
+    - country
+    - region
+    - airport_type
+    - active_status
+
+  Route:
+    - route_id
+    - origin_airport_id
+    - destination_airport_id
+    - route_code
+    - route_type
+    - distance_km
+    - average_flight_duration_minutes
+    - region
+    - route_status
+
+  Aircraft:
+    - aircraft_id
+    - aircraft_model
+    - manufacturer
+    - registration_number
+    - total_seats
+    - economy_seats
+    - premium_economy_seats
+    - business_seats
+    - aircraft_status
+    - in_service_date
+
+  Aircraft Configuration:
+    - aircraft_configuration_id
+    - aircraft_id
+    - configuration_name
+    - economy_seat_capacity
+    - premium_economy_seat_capacity
+    - business_seat_capacity
+    - total_seat_capacity
+    - effective_start_date
+    - effective_end_date
+    - active_status
+
+  Flight:
+    - flight_id
+    - flight_number
+    - route_id
+    - aircraft_id
+    - aircraft_configuration_id
+    - flight_date
+    - scheduled_departure_time
+    - scheduled_arrival_time
+    - actual_departure_time
+    - actual_arrival_time
+    - departure_time_category
+    - day_type
+    - travel_season
+    - flight_status
+
+  Cabin Class:
+    - cabin_class_id
+    - cabin_class_name
+    - cabin_description
+    - service_level
+    - active_status
+
+  Booking:
+    - booking_id
+    - flight_id
+    - cabin_class_id
+    - booking_date
+    - passenger_segment
+    - passenger_count
+    - fare_category
+    - booking_channel
+    - booking_lead_days
+    - ticket_price_per_passenger
+    - gross_revenue
+    - booking_status
+    - cancellation_amount
+    - refund_amount
+    - net_revenue
+
+  Flight Cabin Inventory:
+    - flight_cabin_inventory_id
+    - flight_id
+    - cabin_class_id
+    - available_seats
+    - booked_seats
+    - cancelled_seats
+    - waitlisted_seats
+    - remaining_seats
+    - cabin_load_factor
+    - gross_revenue
+    - net_revenue
+    - revenue_per_available_seat
+
+reporting_requirements:
+  - report_name: Route Revenue Performance
+    description: >
+      Show flight count, passenger demand, booked seats, gross revenue, net revenue,
+      average ticket price, and revenue per available seat by route, flight date,
+      region, and cabin class.
+
+  - report_name: Cabin Load Factor Analysis
+    description: >
+      Show available seats, booked seats, remaining seats, cancelled seats,
+      waitlisted seats, cabin load factor, and revenue per available seat for each
+      flight and cabin class.
+
+  - report_name: Booking Lead Time Analysis
+    description: >
+      Show booking count, passenger count, average ticket price, gross revenue, and
+      net revenue by booking lead days, fare category, cabin class, booking channel,
+      and passenger segment.
+
+  - report_name: Aircraft Utilization Analysis
+    description: >
+      Show flight count, assigned routes, available seats, booked seats, total
+      revenue, load factor, and revenue per seat by aircraft and flight date.
+
+  - report_name: Seasonal Demand Analysis
+    description: >
+      Show booking volume, passenger demand, booked seats, average ticket price,
+      net revenue, and cabin load factor by month, season, route, and cabin class.
+
+  - report_name: Cancellation and Refund Analysis
+    description: >
+      Show cancelled bookings, refunded bookings, cancellation amount, refund
+      amount, lost revenue, and net revenue by route, cabin class, fare category,
+      and booking channel.
+
+  - report_name: Cabin Capacity Recommendation
+    description: >
+      Identify constrained and underutilized cabins using available seats, booked
+      seats, remaining seats, cabin load factor, net revenue, and revenue per
+      available seat, and recommend whether to increase, maintain, rebalance, or
+      reduce cabin capacity.
+
+expected_output:
+  - Conceptual data model
+  - Logical data model
+  - Physical PostgreSQL data model
+  - SQL DDL scripts
+  - Table relationships
+  - Synthetic relational dataset
+  - Excel output with synthetic data
+  - PostgreSQL loading support
+  - Power BI ready tables
+  - Cabin capacity optimization recommendations

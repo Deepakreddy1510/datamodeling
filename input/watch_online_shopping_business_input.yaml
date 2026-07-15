@@ -1,0 +1,311 @@
+business_name: TimeCraft Online Watch Store
+
+business_type: Online Watch Retail and E-Commerce
+
+target_database: PostgreSQL
+
+business_description: >
+  TimeCraft is an online watch shopping platform where customers browse watches,
+  compare collections, place orders, make payments, receive shipments, and request
+  returns or warranty support. The business sells watches across different brands,
+  collections, styles, genders, strap materials, dial colors, and price ranges.
+  The company wants better visibility into sales, customer behavior, product demand,
+  inventory availability, payment success, shipment performance, returns, and warranty
+  claims.
+
+model_purpose: >
+  Create a PostgreSQL analytical data model that helps the business analyze online
+  watch sales, customer purchase behavior, product and brand performance, inventory
+  availability, order fulfillment, payment outcomes, shipment performance, returns,
+  and warranty service trends. The model should support business reporting,
+  operational analysis, and synthetic data generation for testing.
+
+main_business_processes:
+  - Customer registration and profile management
+  - Watch product catalog management
+  - Brand and collection management
+  - Online product browsing
+  - Inventory availability tracking
+  - Shopping cart and order placement
+  - Order item tracking
+  - Payment processing
+  - Shipment and delivery tracking
+  - Return request handling
+  - Warranty registration and claim tracking
+  - Customer purchase history analysis
+  - Sales and product performance reporting
+
+key_business_entities:
+  - entity_name: Customer
+    description: A person who registers on the online watch store and places watch orders.
+
+  - entity_name: Watch Product
+    description: A watch item available for sale on the website.
+
+  - entity_name: Brand
+    description: A watch brand sold through the online store.
+
+  - entity_name: Collection
+    description: A product collection or watch series grouped under a brand.
+
+  - entity_name: Inventory
+    description: Stock availability for watch products by warehouse or fulfillment location.
+
+  - entity_name: Warehouse
+    description: A fulfillment location that stores inventory and ships customer orders.
+
+  - entity_name: Order
+    description: A purchase request placed by a customer.
+
+  - entity_name: Order Item
+    description: A watch product line item inside a customer order.
+
+  - entity_name: Payment
+    description: Payment transaction information related to a customer order.
+
+  - entity_name: Shipment
+    description: Shipment and delivery tracking details for a customer order.
+
+  - entity_name: Return Request
+    description: A customer request to return one or more ordered watch products.
+
+  - entity_name: Warranty Claim
+    description: Warranty registration or service claim raised for a purchased watch.
+
+business_relationships:
+  - relationship_name: Customer places Orders
+    description: One customer can place many orders.
+
+  - relationship_name: Order contains Order Items
+    description: One order can contain many order items.
+
+  - relationship_name: Watch Product appears in Order Items
+    description: One watch product can appear in many order items.
+
+  - relationship_name: Brand has Watch Products
+    description: One brand can have many watch products.
+
+  - relationship_name: Collection has Watch Products
+    description: One collection can include many watch products.
+
+  - relationship_name: Warehouse stores Inventory
+    description: One warehouse can store inventory for many watch products.
+
+  - relationship_name: Watch Product has Inventory
+    description: One watch product can have inventory records across warehouses.
+
+  - relationship_name: Order has Payment
+    description: Each order should have payment transaction information.
+
+  - relationship_name: Order has Shipment
+    description: Each order should have shipment and delivery tracking information.
+
+  - relationship_name: Order Item can have Return Request
+    description: One order item may have a return request if the customer returns the product.
+
+  - relationship_name: Order Item can have Warranty Claim
+    description: One order item may have a warranty claim after purchase.
+
+entity_attributes:
+  Customer:
+    - customer_id
+    - customer_name
+    - email
+    - phone
+    - city
+    - customer_segment
+    - signup_date
+    - is_active
+
+  Brand:
+    - brand_id
+    - brand_name
+    - country_of_origin
+    - brand_tier
+    - is_active
+
+  Collection:
+    - collection_id
+    - brand_id
+    - collection_name
+    - launch_year
+    - collection_status
+
+  Watch Product:
+    - product_id
+    - brand_id
+    - collection_id
+    - product_name
+    - watch_category
+    - gender_category
+    - movement_type
+    - strap_material
+    - dial_color
+    - case_size_mm
+    - water_resistance
+    - unit_price
+    - product_status
+
+  Warehouse:
+    - warehouse_id
+    - warehouse_name
+    - city
+    - region
+    - warehouse_type
+    - is_active
+
+  Inventory:
+    - inventory_id
+    - product_id
+    - warehouse_id
+    - available_quantity
+    - reserved_quantity
+    - reorder_level
+    - inventory_status
+    - last_stock_update_date
+
+  Order:
+    - order_id
+    - customer_id
+    - order_date
+    - order_status
+    - order_channel
+    - order_total_amount
+    - discount_amount
+    - net_order_amount
+
+  Order Item:
+    - order_item_id
+    - order_id
+    - product_id
+    - warehouse_id
+    - quantity
+    - unit_price
+    - discount_amount
+    - line_total_amount
+
+  Payment:
+    - payment_id
+    - order_id
+    - payment_method
+    - payment_status
+    - payment_amount
+    - payment_date
+    - transaction_reference
+
+  Shipment:
+    - shipment_id
+    - order_id
+    - warehouse_id
+    - courier_partner
+    - shipment_status
+    - promised_delivery_date
+    - actual_delivery_date
+    - delivery_delay_days
+
+  Return Request:
+    - return_id
+    - order_item_id
+    - return_reason
+    - return_status
+    - requested_date
+    - approved_date
+    - refund_amount
+
+  Warranty Claim:
+    - warranty_claim_id
+    - order_item_id
+    - claim_reason
+    - claim_status
+    - claim_date
+    - service_completion_date
+    - service_cost_amount
+
+business_rules:
+  - Order total amount should equal the sum of order item line total amounts before discounts.
+  - Net order amount should equal order total amount minus discount amount.
+  - Order item line total amount should equal quantity multiplied by unit price minus item discount amount.
+  - Payment amount should match the net order amount for successful payments.
+  - Available inventory quantity should not be negative.
+  - Reserved inventory quantity should not be negative.
+  - Product unit price should be greater than zero.
+  - Order quantity should be greater than zero.
+  - Shipment promised delivery date should be on or after the order date.
+  - Delivered shipments should have an actual delivery date.
+  - Delivery delay days should be zero or positive.
+  - Refund amount should not exceed the related order item line total amount.
+  - Warranty claim service cost should not be negative.
+  - Return requested date should be on or after the order date.
+  - Active status fields should be boolean values.
+
+reporting_requirements:
+  - report_name: Daily Watch Sales Report
+    description: Show daily order count, quantity sold, gross sales, discounts, and net sales.
+
+  - report_name: Product Performance Report
+    description: Show sales by watch product, brand, collection, category, movement type, strap material, and dial color.
+
+  - report_name: Customer Segment Report
+    description: Show orders, revenue, average order value, and repeat purchases by customer segment and city.
+
+  - report_name: Brand and Collection Report
+    description: Show revenue, units sold, and average selling price by brand and collection.
+
+  - report_name: Inventory Availability Report
+    description: Show available quantity, reserved quantity, reorder risk, and inventory status by product and warehouse.
+
+  - report_name: Payment Status Report
+    description: Show successful, failed, pending, and refunded payments by payment method and order channel.
+
+  - report_name: Shipment Performance Report
+    description: Show shipment status, delayed shipments, average delivery delay, and courier performance.
+
+  - report_name: Return Analysis Report
+    description: Show return count, return reasons, refund amount, and return rate by product, brand, and category.
+
+  - report_name: Warranty Claim Report
+    description: Show warranty claim count, claim reasons, service cost, and claim status by product and brand.
+
+expected_model_layers:
+  - Raw/load tables with names starting with load_ for source ingestion.
+  - Staging tables with names starting with stg_ for cleaned operational data.
+  - Dimension tables with names starting with dim_ for customers, products, brands, collections, warehouses, dates, payment methods, shipment partners, and statuses.
+  - Fact tables with names starting with fact_ for orders, order items, payments, shipments, inventory snapshots, returns, and warranty claims.
+  - Reporting views with names starting with reporting_ for business analytics.
+
+grain_expectations:
+  - Fact Order should have one row per customer order.
+  - Fact Order Item should have one row per product line item inside an order.
+  - Fact Payment should have one row per payment transaction.
+  - Fact Shipment should have one row per shipment.
+  - Fact Inventory Snapshot should have one row per product per warehouse per stock update date.
+  - Fact Return should have one row per return request.
+  - Fact Warranty Claim should have one row per warranty claim.
+
+expected_output:
+  - Conceptual data model
+  - Logical data model
+  - Physical PostgreSQL data model
+  - Raw/load tables with load_ prefix
+  - Staging tables with stg_ prefix
+  - Dimension tables with dim_ prefix
+  - Fact tables with fact_ prefix
+  - Reporting views with reporting_ prefix
+  - SQL DDL scripts
+  - Table relationships
+  - Primary keys and foreign keys
+  - Business rules and constraints
+  - Fact grain explanation
+  - AI additions and assumptions
+  - Synthetic data generation support
+  - Excel output with sample synthetic data
+  - PostgreSQL loading support
+
+database_design_preferences:
+  - Use PostgreSQL compatible DDL.
+  - Use clear primary keys and foreign keys.
+  - Use surrogate keys for dimension and fact tables where suitable.
+  - Use business keys to connect staging tables to dimensions.
+  - Use meaningful constraints for dates, amounts, quantities, statuses, and calculated values.
+  - Do not apply unique constraints to low-cardinality descriptive fields such as status, category, city, region, color, material, movement type, payment method, courier partner, and boolean flags.
+  - Keep the model simple enough for analytics and reporting.
