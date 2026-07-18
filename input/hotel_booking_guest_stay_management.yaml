@@ -1,0 +1,181 @@
+business_name: Hotel Booking and Guest Stay Management
+business_type: Hospitality Booking and Guest Stay Operations
+target_database: PostgreSQL
+business_description: 'The business manages hotel properties, guest profiles, room
+  availability, reservations, guest stays, payments, and service requests. The hotel
+  wants to understand booking demand, room usage, guest stay activity, revenue, payment
+  status, and service request performance.
+
+  '
+model_purpose: 'Create a data model that helps the hotel business analyze bookings,
+  guests, rooms, stays, payments, service requests, occupancy, revenue, and operational
+  performance. The model should support reporting, PostgreSQL loading, and synthetic
+  data generation for testing.
+
+  '
+main_business_processes:
+- Hotel property management
+- Guest profile management
+- Room inventory management
+- Room booking and reservation tracking
+- Guest check-in and check-out tracking
+- Guest stay revenue tracking
+- Payment tracking
+- Guest service request tracking
+- Occupancy and revenue reporting
+key_business_entities:
+- entity_name: Hotel Property
+  description: A hotel location where rooms are available for guests.
+- entity_name: Guest
+  description: A customer who books or stays at the hotel.
+- entity_name: Room
+  description: A hotel room available for booking and guest stays.
+- entity_name: Booking
+  description: A guest reservation for a room for specific stay dates.
+- entity_name: Guest Stay
+  description: The actual stay record after the guest checks in.
+- entity_name: Payment
+  description: A payment made by a guest for a booking or stay.
+- entity_name: Service Request
+  description: A guest request for hotel service during a stay.
+business_relationships:
+- relationship_name: Hotel Property has Rooms
+  description: One hotel property can have many rooms.
+- relationship_name: Guest makes Bookings
+  description: One guest can make many bookings.
+- relationship_name: Room has Bookings
+  description: One room can be booked many times across different dates.
+- relationship_name: Booking creates Guest Stay
+  description: One booking can result in one guest stay.
+- relationship_name: Booking has Payments
+  description: One booking can have one or more payments.
+- relationship_name: Guest Stay has Service Requests
+  description: One guest stay can have many service requests.
+entity_attributes:
+  Hotel Property:
+  - hotel_id
+  - hotel_name
+  - city
+  - country
+  - hotel_status
+  Guest:
+  - guest_id
+  - guest_name
+  - email
+  - phone_number
+  - loyalty_status
+  - guest_status
+  Room:
+  - room_id
+  - hotel_id
+  - room_number
+  - room_type
+  - floor_number
+  - room_status
+  - nightly_rate
+  Booking:
+  - booking_id
+  - guest_id
+  - room_id
+  - booking_date
+  - check_in_date
+  - check_out_date
+  - booking_status
+  - booking_channel
+  - guest_count
+  - booked_amount
+  Guest Stay:
+  - stay_id
+  - booking_id
+  - actual_check_in_date
+  - actual_check_out_date
+  - stay_status
+  - nights_stayed
+  - room_charge_amount
+  Payment:
+  - payment_id
+  - booking_id
+  - payment_date
+  - payment_method
+  - payment_status
+  - payment_amount
+  Service Request:
+  - request_id
+  - stay_id
+  - request_type
+  - request_date
+  - request_status
+  - request_priority
+  - resolution_date
+business_rules:
+- Every room must belong to a valid hotel property
+- Every booking must belong to a valid guest
+- Every booking must refer to a valid room
+- Check-out date cannot be earlier than check-in date
+- Actual check-out date cannot be earlier than actual check-in date
+- Nightly rate must be greater than zero
+- Guest count must be greater than zero
+- Booked amount must be greater than zero
+- Room charge amount must be greater than or equal to zero
+- Payment amount must be greater than or equal to zero
+- Payment date should not be earlier than booking date
+- Resolution date cannot be earlier than request date
+- Cancelled bookings should not have completed guest stays
+reporting_requirements:
+- report_name: Booking Status Report
+  description: Show bookings by guest, room, booking date, stay dates, channel, and
+    status.
+- report_name: Room Occupancy Report
+  description: Show room usage, booked nights, room type, and occupancy status.
+- report_name: Guest Stay Report
+  description: Show guest check-in, check-out, stay status, nights stayed, and room
+    charges.
+- report_name: Payment Collection Report
+  description: Show payment method, payment status, payment date, and payment amount
+    by booking.
+- report_name: Service Request Report
+  description: Show guest service requests by stay, request type, priority, status,
+    and resolution date.
+- report_name: Hotel Revenue Report
+  description: Show booked amount, room charge amount, payment amount, and revenue
+    by hotel and room type.
+synthetic_data_requirements:
+  rows_per_table: 10
+  locale: en_GB
+  country: United Kingdom
+  generation_engine: codex-cli
+  value_quality_rules:
+  - Generate meaningful fictional hotel, guest, and room values
+  - Generate realistic hotel cities, room types, booking channels, payment methods,
+    and service request types
+  - Do not use placeholders such as Guest 001, Room 001, Booking 001, or Hotel 001
+  - Keep related values logically consistent across hotel, guest, room, booking, stay,
+    payment, and service request records
+  - Keep check-in and check-out dates logically ordered
+  - Keep actual stay dates aligned with booking dates
+  - Use valid dates, numbers, statuses, room types, payment methods, and request priorities
+  - Keep all generated text values under 30 characters unless the field is a description
+  - Use short hotel_status values only from Open, Closed, Renovating
+  - Use short guest_status values only from Active, Inactive
+  - Use short loyalty_status values only from None, Silver, Gold, Platinum
+  - Use short room_type values only from Single, Double, Twin, Suite, Family
+  - Use short room_status values only from Available, Booked, Occupied, Cleaning
+  - Use short booking_status values only from Booked, Checked In, Completed, Cancelled
+  - Use short booking_channel values only from Web, Phone, Agent, Walk In
+  - Use short stay_status values only from Active, Completed, No Show
+  - Use short payment_method values only from Card, Cash, Transfer, Wallet
+  - Use short payment_status values only from Paid, Pending, Failed, Refunded
+  - Use short request_type values only from Cleaning, Towels, Repair, Food, Taxi
+  - Use short request_status values only from Open, In Progress, Done, Cancelled
+  - Use short request_priority values only from Low, Medium, High
+  - Clearly treat generated records as synthetic demonstration data
+expected_output:
+- Conceptual data model
+- Logical data model
+- Physical PostgreSQL data model
+- SQL DDL scripts
+- Table relationships
+- Fact and dimension design
+- Synthetic data generation support
+- Excel output with sample synthetic data
+- PostgreSQL loading support
