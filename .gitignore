@@ -4,12 +4,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Environment / secrets
+# Secrets / environment
 .env
 .env.*
 !.env.example
 
-# Outputs / generated files
+# Generated outputs
 output/
 *.xlsx
 *.xls
