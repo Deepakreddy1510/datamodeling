@@ -14,7 +14,11 @@ def _overall_status(*statuses):
     return "passed"
 
 
+<<<<<<< HEAD
 def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation, pipeline_plan=None, codex_assumptions=None, codex_sql_artifact=None, elt_execution=None, lineage_validation=None):
+=======
+def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation):
+>>>>>>> personal/main
     stats = validation.get("generation_stats", {})
     final_status = _overall_status(validation.get("status"), "passed_with_warnings" if getattr(model, "warnings", []) else None)
     lines = [
@@ -35,6 +39,7 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     for table in model.tables:
         lines.append(f"| {table.full_name} | {len(table.columns)} | {', '.join(table.primary_key) or 'None'} | {len(table.foreign_keys)} |")
 
+<<<<<<< HEAD
     if pipeline_plan:
         lines.extend(["", "## Warehouse Pipeline Classification", ""])
         lines.append(f"- Raw/load tables: {', '.join(pipeline_plan.get('raw_tables', [])) or 'None'}")
@@ -82,6 +87,8 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
         lines.extend(["", "## Lineage Validation Summary", "", f"- Status: **{lineage_validation.get('status', 'unknown')}**"])
         lines.extend([f"- {error}" for error in lineage_validation.get('errors', [])] or ["- No lineage errors."])
 
+=======
+>>>>>>> personal/main
     lines.extend(["", "## Ignored Constraints / Warnings", ""])
     ignored = []
     for table in model.tables:
@@ -148,18 +155,26 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     write_text(path, lines)
 
 
+<<<<<<< HEAD
 def write_postgres_report(path, load_requested, result, skipped_reason=None):
+=======
+def write_postgres_report(path, load_requested, result):
+>>>>>>> personal/main
     lines = ["# PostgreSQL Load Report", "", f"- Load requested: {load_requested}", ""]
     if not load_requested:
         lines.append("PostgreSQL load was skipped because `--no-load-to-postgres` was used or `--load-to-postgres` was not passed.")
     else:
+<<<<<<< HEAD
         reason = skipped_reason or result.get("skipped_reason")
+=======
+>>>>>>> personal/main
         lines.extend([
             f"- Final status: **{result.get('status', 'unknown')}**",
             f"- Target schema: `{result.get('target_schema', '')}`",
             f"- Schema creation status: {result.get('schema_creation_status', 'not_attempted')}",
             f"- Table creation status: {result.get('table_creation_status', 'not_attempted')}",
             f"- Transaction status: {result.get('transaction_status', 'unknown')}",
+<<<<<<< HEAD
         ])
         if reason:
             lines.extend(["", "## Execution Skipped", "", f"- {reason}"])
@@ -168,13 +183,23 @@ def write_postgres_report(path, load_requested, result, skipped_reason=None):
             lines.append(f"| {table} | {count} |")
         if not result.get("inserted_rows"):
             lines.append("| None | 0 |")
+=======
+            "", "## Inserted Rows", "", "| Table | Rows Inserted |", "|---|---:|",
+        ])
+        for table, count in result.get("inserted_rows", {}).items():
+            lines.append(f"| {table} | {count} |")
+>>>>>>> personal/main
         if result.get("errors"):
             lines.extend(["", "## Errors", ""])
             lines.extend([f"- {error}" for error in result["errors"]])
     write_text(path, lines)
 
 
+<<<<<<< HEAD
 def write_validation_report(path, pre_validation, post_validation=None, lineage_validation=None):
+=======
+def write_validation_report(path, pre_validation, post_validation=None):
+>>>>>>> personal/main
     final_status = _overall_status(pre_validation.get("status"), post_validation.get("status") if post_validation else None)
     stats = pre_validation.get("generation_stats", {})
     lines = ["# Validation Report", "", f"- Final status: **{final_status}**", f"- DDL validation status: **{'failed' if pre_validation.get('errors') else 'passed'}**", f"- Fallback inference count: {stats.get('fallback_to_ddl_inference_count', 0)}", f"- Semantic type count: {len(stats.get('semantic_types', {}))}", f"- Placeholder warning count: {len(pre_validation.get('placeholder_warnings', []))}", f"- Semantic placeholder validation status: **{'failed' if pre_validation.get('semantic_placeholder_errors') else 'passed'}**", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
@@ -212,6 +237,7 @@ def write_validation_report(path, pre_validation, post_validation=None, lineage_
         lines.append("| None | 0 |")
     lines.extend(["", "## Unsupported Calculation Rules", ""])
     lines.extend([f"- {item}" for item in stats.get("calculation_warnings", [])] or ["- None"])
+<<<<<<< HEAD
     lines.extend(["", "## Lineage Validation", ""])
     if lineage_validation is None:
         lineage_validation = pre_validation.get("lineage_validation")
@@ -237,6 +263,8 @@ def write_validation_report(path, pre_validation, post_validation=None, lineage_
         lines.extend([f"- Warning: {item}" for item in realism.get("warnings", [])])
         lines.extend([f"- Check: {item}" for item in realism.get("checks", [])] or ["- No realism checks were recorded."])
 
+=======
+>>>>>>> personal/main
     lines.extend(["", "## PostgreSQL Validation", ""])
     if post_validation is None:
         lines.append("PostgreSQL validation was skipped because no database load was requested.")

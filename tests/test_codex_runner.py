@@ -36,6 +36,7 @@ def test_resolve_codex_executable_tries_windows_cmd(monkeypatch):
     monkeypatch.setattr("shutil.which", fake_which)
     assert resolve_codex_executable() == "C:/tools/codex.cmd"
     assert seen[:2] == ["codex", "codex.cmd"]
+<<<<<<< HEAD
 
 
 def test_codex_client_skips_git_repo_check(monkeypatch):
@@ -61,3 +62,5 @@ def test_codex_client_skips_git_repo_check(monkeypatch):
         "-",
     ]
     assert (captured["cwd"] / "src").exists()
+=======
+>>>>>>> personal/main

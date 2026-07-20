@@ -2,17 +2,26 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+<<<<<<< HEAD
 import hashlib
+=======
+>>>>>>> personal/main
 import json
 from pathlib import Path
 import re
 import subprocess
 
+<<<<<<< HEAD
 from codex_runner import CodexRunnerError, resolve_codex_executable
 from runtime_config import PROJECT_ROOT
 
 from .synthetic_data_generator import finalize_generated_value, table_generation_order
 from .warehouse_generation_profile import build_warehouse_generation_profile
+=======
+from codex_runner import resolve_codex_executable
+
+from .synthetic_data_generator import finalize_generated_value, table_generation_order
+>>>>>>> personal/main
 
 
 class CodexCliGenerationError(Exception):
@@ -49,6 +58,7 @@ def _redact_for_prompt(value):
 
 
 class CodexCliDataGenerator:
+<<<<<<< HEAD
     def __init__(
         self,
         output_dir="output/codex_generated_data",
@@ -60,6 +70,12 @@ class CodexCliDataGenerator:
         self.timeout_seconds = timeout_seconds
         self.executable = executable
         self.reuse_cached = reuse_cached
+=======
+    def __init__(self, output_dir="output/codex_generated_data", timeout_seconds=300, executable="codex"):
+        self.output_dir = Path(output_dir)
+        self.timeout_seconds = timeout_seconds
+        self.executable = resolve_codex_executable() if executable == "codex" else executable
+>>>>>>> personal/main
 
     def generate_tables(self, *, model, business_input, ddl_text, rows_per_table, allow_fallback=False):
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -102,6 +118,7 @@ class CodexCliDataGenerator:
         generated["__expected_rows__"] = expected_rows
         return generated
 
+<<<<<<< HEAD
 
     def generate_warehouse_elt(self, *, model, business_input, ddl_text, semantic_context, pipeline_plan, rows_per_table, generation_profile=None):
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -258,6 +275,19 @@ class CodexCliDataGenerator:
                 cwd=PROJECT_ROOT,
             )
         except (OSError, subprocess.TimeoutExpired, CodexRunnerError) as exc:
+=======
+    def _run_codex(self, prompt):
+        try:
+            result = subprocess.run(
+                [self.executable, "exec", "-"],
+                text=True,
+                input=prompt,
+                capture_output=True,
+                timeout=self.timeout_seconds,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+>>>>>>> personal/main
             raise CodexCliGenerationError(f"Codex CLI generation failed: {exc}") from exc
         if result.returncode != 0:
             stderr = (result.stderr or "").strip()

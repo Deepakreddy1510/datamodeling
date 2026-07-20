@@ -83,6 +83,7 @@ CREATE TABLE dim_method (
     assert data["__expected_rows__"] == {"dim_method": 2}
     assert len(data["dim_method"]) == 2
     assert validate_generated_data(model, data, data["__expected_rows__"])["status"] == "passed"
+<<<<<<< HEAD
 
 
 def test_codex_warehouse_elt_prompt_requires_raw_only_generation(tmp_path):
@@ -145,3 +146,5 @@ def test_codex_warehouse_elt_reuses_matching_cached_response(tmp_path, monkeypat
     assert first == second
     assert len(calls) == 1
     assert (tmp_path / "warehouse_elt_cache.json").exists()
+=======
+>>>>>>> personal/main

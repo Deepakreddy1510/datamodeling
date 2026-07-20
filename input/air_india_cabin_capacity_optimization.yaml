@@ -5,6 +5,7 @@ business_type: Airline Revenue Management and Cabin Capacity Optimization
 target_database: PostgreSQL
 
 business_description: >
+<<<<<<< HEAD
   Air India operates domestic and international flights using different aircraft
   and cabin configurations. Passengers book seats through multiple channels and
   fare categories across Economy, Premium Economy, and Business Class. The business
@@ -31,10 +32,32 @@ main_business_processes:
   - Flight cabin inventory tracking
   - Revenue tracking
   - Route demand analysis
+=======
+  Air India wants to analyze flight bookings, route performance, cabin demand,
+  ticket revenue, aircraft utilization, booking lead time, and seasonal travel
+  patterns to optimize seat allocation across Economy, Premium Economy, and
+  Business Class.
+
+model_purpose: >
+  Create a PostgreSQL data model and synthetic dataset that supports airline
+  revenue analysis, cabin load-factor analysis, demand forecasting, aircraft
+  utilization, pricing analysis, and cabin-capacity optimization recommendations.
+
+main_business_processes:
+  - Route management
+  - Aircraft configuration management
+  - Flight scheduling
+  - Passenger booking
+  - Cabin allocation
+  - Fare and ticket pricing
+  - Revenue tracking
+  - Flight demand analysis
+>>>>>>> personal/main
   - Aircraft utilization analysis
   - Cabin capacity recommendation
 
 key_business_entities:
+<<<<<<< HEAD
   - entity_name: Airport
     description: An airport used as the origin or destination of a flight route.
 
@@ -231,6 +254,20 @@ reporting_requirements:
       seats, remaining seats, cabin load factor, net revenue, and revenue per
       available seat, and recommend whether to increase, maintain, rebalance, or
       reduce cabin capacity.
+=======
+  - Route
+  - Aircraft
+  - Flight
+  - Booking
+
+business_relationships:
+  - One route can have many flights.
+  - One aircraft can operate many flights.
+  - One flight belongs to one route.
+  - One flight uses one aircraft.
+  - One flight can have many bookings.
+  - Each booking belongs to one flight.
+>>>>>>> personal/main
 
 expected_output:
   - Conceptual data model
@@ -242,4 +279,217 @@ expected_output:
   - Excel output with synthetic data
   - PostgreSQL loading support
   - Power BI ready tables
+<<<<<<< HEAD
   - Cabin capacity optimization recommendations
+=======
+  - Cabin optimization recommendations
+
+
+entity_attributes:
+
+  Route:
+    - route_id
+    - origin_airport
+    - destination_airport
+    - route_type
+    - distance_km
+    - average_flight_duration_hours
+    - region
+    - route_status
+
+  Aircraft:
+    - aircraft_id
+    - aircraft_model
+    - registration_number
+    - total_seats
+    - economy_seats
+    - premium_economy_seats
+    - business_seats
+    - aircraft_status
+
+  Aircraft Configuration:
+    - aircraft_configuration_id
+    - aircraft_id
+    - configuration_name
+    - economy_seat_capacity
+    - premium_economy_seat_capacity
+    - business_seat_capacity
+    - total_seat_capacity
+    - effective_start_date
+    - effective_end_date
+
+  Flight:
+    - flight_id
+    - flight_number
+    - route_id
+    - aircraft_id
+    - flight_date
+    - scheduled_departure_time
+    - scheduled_arrival_time
+    - departure_time_category
+    - day_type
+    - travel_season
+    - flight_status
+
+  Booking:
+    - booking_id
+    - flight_id
+    - booking_date
+    - passenger_segment
+    - passenger_count
+    - cabin_class
+    - fare_category
+    - booking_channel
+    - booking_lead_days
+    - ticket_price
+    - booking_status
+    - cancellation_amount
+    - refund_amount
+    - net_revenue
+
+  Cabin Class:
+    - cabin_class_id
+    - cabin_class_name
+    - cabin_description
+    - service_level
+    - active_status
+
+  Flight Cabin Inventory:
+    - flight_cabin_inventory_id
+    - flight_id
+    - cabin_class_id
+    - available_seats
+    - booked_seats
+    - cancelled_seats
+    - waitlisted_seats
+    - remaining_seats
+    - cabin_load_factor
+
+  Airport:
+    - airport_id
+    - airport_code
+    - airport_name
+    - city
+    - country
+    - region
+    - airport_type
+
+  Calendar:
+    - date_key
+    - calendar_date
+    - day_name
+    - day_of_week
+    - week_number
+    - month_name
+    - month_number
+    - quarter
+    - year
+    - day_type
+    - holiday_flag
+    - travel_season
+
+reporting_requirements:
+
+  - report_name: Route Revenue Performance
+    grain: One row per route, flight date, and cabin class
+    description: Analyze passenger demand, bookings, and revenue by route.
+    dimensions:
+      - origin_airport
+      - destination_airport
+      - route_type
+      - region
+      - flight_date
+      - cabin_class
+    metrics:
+      - flight_count
+      - passenger_count
+      - booked_seats
+      - gross_revenue
+      - net_revenue
+      - average_ticket_price
+      - revenue_per_seat
+
+  - report_name: Cabin Load Factor Analysis
+    grain: One row per flight and cabin class
+    description: Measure cabin utilization and identify constrained or underutilized cabins.
+    dimensions:
+      - flight_number
+      - flight_date
+      - route
+      - aircraft_model
+      - cabin_class
+    metrics:
+      - available_seats
+      - booked_seats
+      - remaining_seats
+      - cancelled_seats
+      - cabin_load_factor
+      - revenue_per_available_seat
+
+  - report_name: Booking Lead Time Analysis
+    grain: One row per booking
+    description: Analyze how booking lead time affects ticket price and demand.
+    dimensions:
+      - booking_lead_days
+      - fare_category
+      - cabin_class
+      - booking_channel
+      - passenger_segment
+    metrics:
+      - booking_count
+      - passenger_count
+      - average_ticket_price
+      - gross_revenue
+      - net_revenue
+
+  - report_name: Aircraft Utilization Analysis
+    grain: One row per aircraft and flight date
+    description: Analyze aircraft usage, seat capacity, revenue, and route assignment.
+    dimensions:
+      - aircraft_model
+      - registration_number
+      - route
+      - flight_date
+    metrics:
+      - flight_count
+      - available_seats
+      - booked_seats
+      - total_revenue
+      - load_factor
+      - revenue_per_seat
+
+  - report_name: Seasonal Demand Analysis
+    grain: One row per month, season, route, and cabin class
+    description: Identify seasonal demand and revenue patterns.
+    dimensions:
+      - year
+      - month
+      - travel_season
+      - route
+      - cabin_class
+    metrics:
+      - booking_count
+      - passenger_count
+      - booked_seats
+      - average_ticket_price
+      - net_revenue
+      - cabin_load_factor
+
+  - report_name: Cabin Capacity Recommendation
+    grain: One row per flight, aircraft, and cabin class
+    description: Recommend aircraft or cabin configuration changes based on demand and profitability.
+    dimensions:
+      - flight_number
+      - route
+      - aircraft_model
+      - cabin_class
+    metrics:
+      - available_seats
+      - booked_seats
+      - cabin_load_factor
+      - revenue_per_seat
+      - net_revenue
+      - capacity_constraint_flag
+      - underutilization_flag
+      - recommended_capacity_action
+>>>>>>> personal/main
