@@ -1,6 +1,10 @@
 import json
 import shutil
 import subprocess
+<<<<<<< HEAD
+from runtime_config import PROJECT_ROOT
+=======
+>>>>>>> personal/main
 
 
 class CodexRunnerError(Exception):
@@ -23,11 +27,19 @@ class CodexCLIClient:
         executable = resolve_codex_executable()
         try:
             result = subprocess.run(
+<<<<<<< HEAD
+                [executable, "exec", "--skip-git-repo-check", "-"],
+=======
                 [executable, "exec", "-"],
+>>>>>>> personal/main
                 input=prompt_text,
                 capture_output=True,
                 text=True,
                 check=True,
+<<<<<<< HEAD
+                cwd=PROJECT_ROOT,
+=======
+>>>>>>> personal/main
             )
         except FileNotFoundError as exc:
             raise CodexRunnerError(

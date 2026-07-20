@@ -1,0 +1,14 @@
+{
+  "confidence": "high",
+  "fact_dimension_inference_required": true,
+  "model_type": "analytical_data_warehouse",
+  "modeling_style": "dimensional_model",
+  "reason": "Reporting and analytics requirements are present.",
+  "required_layers": [
+    "raw_load",
+    "staging",
+    "dimension",
+    "fact",
+    "reporting"
+  ]
+}

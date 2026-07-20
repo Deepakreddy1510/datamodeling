@@ -1,5 +1,8 @@
 import argparse
+<<<<<<< HEAD
+=======
 import json
+>>>>>>> personal/main
 import sys
 from pathlib import Path
 
@@ -25,16 +28,28 @@ from response_parser import parse_json_response, validate_generation_response, v
 from rule_score import calculate_rule_based_score
 from validator import validate_required_fields
 from yaml_loader import load_yaml_file
+<<<<<<< HEAD
+from runtime_config import PROJECT_ROOT, resolve_output_dir
+
+
+SEMANTIC_TEMPLATE = PROJECT_ROOT / "prompts" / "codex_semantic_review_prompt_template.md"
+GENERATION_TEMPLATE = PROJECT_ROOT / "prompts" / "codex_generation_prompt_template.md"
+=======
 
 
 SEMANTIC_TEMPLATE = Path("prompts") / "codex_semantic_review_prompt_template.md"
 GENERATION_TEMPLATE = Path("prompts") / "codex_generation_prompt_template.md"
+>>>>>>> personal/main
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="AI Data Model Accelerator MVP")
     parser.add_argument("--input", required=True, help="Path to business input YAML file.")
+<<<<<<< HEAD
+    parser.add_argument("--output-dir", help="Optional output directory. Default: output/<business_name_slug>.")
+=======
     parser.add_argument("--output-dir", default="output", help="Directory for generated output files.")
+>>>>>>> personal/main
     parser.add_argument("--provider", default="codex_cli", help="Only codex_cli is supported in this MVP.")
     parser.add_argument("--mock-codex", action="store_true", help="Use deterministic mock Codex responses.")
     parser.add_argument("--mock-ai-score", type=float, default=86, help="Mock semantic review score, default 86.")
@@ -61,10 +76,14 @@ def _write_quality_report(output_dir, quality_report):
 
 def main():
     args = parse_args()
+<<<<<<< HEAD
+    output_dir = Path(args.output_dir) if args.output_dir else Path("output")
+=======
     output_dir = Path(args.output_dir)
     ensure_output_dir(output_dir)
     # Preferred MVP behavior: always clean known generated outputs before each run.
     clean_known_outputs(output_dir)
+>>>>>>> personal/main
 
     if args.provider == "openai":
         message = "OpenAI provider is not implemented in this MVP. Use --provider codex_cli."
@@ -79,11 +98,21 @@ def main():
 
     try:
         data = load_yaml_file(args.input)
+<<<<<<< HEAD
+        output_dir = resolve_output_dir(args.input, data, args.output_dir)
+        ensure_output_dir(output_dir)
+        clean_known_outputs(output_dir)
+=======
+>>>>>>> personal/main
         validation_result = validate_required_fields(data)
         if not validation_result["is_valid"]:
             write_validation_errors(output_dir, validation_result)
             write_validation_errors_markdown(output_dir, validation_result)
+<<<<<<< HEAD
+            print(f"Validation failed. See {output_dir / 'validation_errors.md'} for details.", file=sys.stderr)
+=======
             print("Validation failed. See output/validation_errors.json and output/validation_errors.md for details.", file=sys.stderr)
+>>>>>>> personal/main
             return 1
 
         write_json(output_dir / "input.json", data)
@@ -110,7 +139,11 @@ def main():
 
         if final_score["decision"] != "ready_for_generation":
             write_improvement_suggestions(output_dir, rule_score, semantic_review, final_score)
+<<<<<<< HEAD
+            print(f"Pipeline completed: input needs improvement. See {output_dir / 'improvement_suggestions.md'}.")
+=======
             print("Pipeline completed: input needs improvement. See output/improvement_suggestions.md.")
+>>>>>>> personal/main
             return 0
 
         model_intent = detect_model_intent(data)
@@ -136,6 +169,16 @@ def main():
         quality_report = validate_generation_quality(generation_response, model_intent, model_blueprint)
         _write_quality_report(output_dir, quality_report)
         if quality_report["status"] == "failed":
+<<<<<<< HEAD
+            print(f"Generation quality validation failed. See {output_dir / 'generation_quality_report.md'}.", file=sys.stderr)
+            return 1
+        write_final_output(output_dir, generation_response)
+        print(f"Pipeline completed: final output generated at {output_dir / 'final_output.md'}.")
+        return 0
+    except Exception as exc:
+        message = str(exc)
+        ensure_output_dir(output_dir)
+=======
             print("Generation quality validation failed. See output/generation_quality_report.md.", file=sys.stderr)
             return 1
         write_final_output(output_dir, generation_response)
@@ -143,6 +186,7 @@ def main():
         return 0
     except Exception as exc:
         message = str(exc)
+>>>>>>> personal/main
         write_error(output_dir, message)
         print(f"Error: {message}", file=sys.stderr)
         return 1

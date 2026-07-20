@@ -36,3 +36,31 @@ def test_resolve_codex_executable_tries_windows_cmd(monkeypatch):
     monkeypatch.setattr("shutil.which", fake_which)
     assert resolve_codex_executable() == "C:/tools/codex.cmd"
     assert seen[:2] == ["codex", "codex.cmd"]
+<<<<<<< HEAD
+
+
+def test_codex_client_skips_git_repo_check(monkeypatch):
+    from types import SimpleNamespace
+
+    from codex_runner import CodexCLIClient
+
+    captured = {}
+
+    monkeypatch.setattr("codex_runner.resolve_codex_executable", lambda: "/usr/bin/codex")
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["cwd"] = kwargs.get("cwd")
+        return SimpleNamespace(stdout="{}", stderr="", returncode=0)
+
+    monkeypatch.setattr("codex_runner.subprocess.run", fake_run)
+    assert CodexCLIClient().run_prompt("prompt") == "{}"
+    assert captured["command"] == [
+        "/usr/bin/codex",
+        "exec",
+        "--skip-git-repo-check",
+        "-",
+    ]
+    assert (captured["cwd"] / "src").exists()
+=======
+>>>>>>> personal/main

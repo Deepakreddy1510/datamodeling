@@ -1,0 +1,205 @@
+business_name: Drug Development and Release Readiness
+business_type: Pharmaceutical Research and Drug Lifecycle Management
+target_database: PostgreSQL
+business_description: 'The business develops drug candidates and tracks their progress
+  through laboratory testing, animal studies, clinical trials, regulatory review,
+  marketing licence approval, patent protection, risk assessment, and market release.
+
+  '
+model_purpose: 'Create a data model that helps the business understand the current
+  development stage of each drug, completed and pending tests, safety and effectiveness
+  results, regulatory approval, licence status, patent status, overall risk, and market
+  release readiness.
+
+  '
+main_business_processes:
+- Pharmaceutical company and drug candidate management
+- Laboratory and preclinical testing
+- Animal study tracking
+- Clinical trial tracking
+- Safety and effectiveness assessment
+- Drug risk assessment
+- Regulatory submission and approval tracking
+- Marketing licence tracking
+- Patent tracking
+- Market release decision
+key_business_entities:
+- entity_name: Pharmaceutical Company
+  description: A company that develops or owns a drug candidate.
+- entity_name: Drug Candidate
+  description: A medicine or active substance being developed for a target condition.
+- entity_name: Development Assessment
+  description: A laboratory test, animal study, clinical trial, or safety assessment
+    performed for a drug.
+- entity_name: Regulatory Record
+  description: Regulatory submission, approval, and marketing licence information
+    for a drug.
+- entity_name: Patent
+  description: Patent ownership, authority, status, and expiry information related
+    to a drug.
+- entity_name: Risk Assessment
+  description: Safety, effectiveness, regulatory, and overall risk assessment for
+    a drug.
+- entity_name: Release Decision
+  description: The decision showing whether a drug is ready for market release.
+business_relationships:
+- relationship_name: Company develops Drug Candidates
+  description: One pharmaceutical company can develop many drug candidates.
+- relationship_name: Drug Candidate has Development Assessments
+  description: One drug candidate can have many laboratory tests, animal studies,
+    and clinical trials.
+- relationship_name: Drug Candidate has Regulatory Records
+  description: One drug candidate can have multiple regulatory submissions and licence
+    records.
+- relationship_name: Drug Candidate has Patents
+  description: One drug candidate can be associated with one or more patents.
+- relationship_name: Drug Candidate has Risk Assessments
+  description: One drug candidate can have multiple risk assessments over time.
+- relationship_name: Drug Candidate has Release Decisions
+  description: One drug candidate can have multiple release-readiness decisions over
+    time.
+entity_attributes:
+  Pharmaceutical Company:
+  - company_id
+  - company_name
+  - headquarters_country
+  - company_status
+  Drug Candidate:
+  - drug_id
+  - company_id
+  - drug_name
+  - active_substance
+  - target_condition
+  - therapeutic_area
+  - dosage_form
+  - route_of_administration
+  - current_development_stage
+  - development_status
+  - development_start_date
+  Development Assessment:
+  - assessment_id
+  - drug_id
+  - assessment_type
+  - assessment_name
+  - clinical_phase
+  - animal_species
+  - assessment_status
+  - start_date
+  - completion_date
+  - assessment_result
+  - safety_result
+  - effectiveness_result
+  - finding
+  - risk_level
+  - participant_count
+  - mandatory_flag
+  Regulatory Record:
+  - regulatory_record_id
+  - drug_id
+  - regulator_name
+  - record_type
+  - submission_type
+  - submission_date
+  - review_status
+  - decision_date
+  - decision_result
+  - licence_status
+  - licence_grant_date
+  - licence_expiry_date
+  Patent:
+  - patent_id
+  - drug_id
+  - patent_title
+  - patent_owner
+  - patent_authority
+  - filing_date
+  - grant_date
+  - expiry_date
+  - patent_status
+  Risk Assessment:
+  - risk_assessment_id
+  - drug_id
+  - assessment_date
+  - safety_risk
+  - effectiveness_risk
+  - regulatory_risk
+  - manufacturing_risk
+  - overall_risk
+  - risk_reason
+  - mitigation_action
+  Release Decision:
+  - release_decision_id
+  - drug_id
+  - decision_date
+  - release_readiness
+  - release_decision
+  - blocking_reason
+  - next_action
+business_rules:
+- Every development assessment must belong to a valid drug candidate
+- A drug cannot enter clinical trials until required preclinical assessments pass
+- Clinical trials should progress from Phase I to Phase II to Phase III
+- A failed mandatory assessment blocks progression
+- Overall risk must be Low, Medium, High, or Critical
+- A drug with unresolved Critical risk cannot be released
+- A drug cannot be released without regulatory approval
+- A drug cannot be released without an active marketing licence
+- Completion dates cannot be earlier than start dates
+- Release decisions must include a blocking reason when the drug is not ready
+reporting_requirements:
+- report_name: Drug Development Status Report
+  description: Show each drug, developing company, current stage, and development
+    status.
+- report_name: Development Assessment Report
+  description: Show laboratory tests, animal studies, clinical trials, completed assessments,
+    pending assessments, and results.
+- report_name: Safety and Risk Report
+  description: Show safety, effectiveness, regulatory, manufacturing, and overall
+    risk levels.
+- report_name: Regulatory and Licence Report
+  description: Show regulatory submission, review, approval, and marketing licence
+    status.
+- report_name: Patent Status Report
+  description: Show patent owner, patent authority, patent status, and expiry date.
+- report_name: Drug Release Readiness Report
+  description: Show whether each drug can be released, the blocking reason, and the
+    next required action.
+synthetic_data_requirements:
+  rows_per_table: 5
+  locale: en_GB
+  country: United Kingdom
+  generation_engine: codex-cli
+  value_quality_rules:
+  - Generate meaningful fictional pharmaceutical companies and drug names
+  - Generate realistic assessment, study, and trial names
+  - Do not use placeholders such as Drug 001 or Clinical Trial 001
+  - Keep related values logically consistent
+  - Use valid dates, numbers, statuses, phases, and risk levels
+  - Do not make factual claims about real medicines or real companies
+  - Clearly treat generated records as synthetic demonstration data
+  - Keep all generated text values under 30 characters unless the field is a description,
+    reason, finding, mitigation action, or next action.
+  - For Regulatory Record, use short regulator_name values such as MHRA, EMA, FDA,
+    TGA, or Health Canada.
+  - For Regulatory Record, use short record_type values only from Submission, Approval,
+    Licence, Review, Renewal.
+  - For Regulatory Record, use short submission_type values only from Initial, Variation,
+    Renewal, Safety, Fast Track.
+  - For Regulatory Record, use short review_status values only from Submitted, In
+    Review, Approved, Rejected, Withdrawn.
+  - For Regulatory Record, use short decision_result values only from Approved, Rejected,
+    Pending, Conditional.
+  - For Regulatory Record, use short licence_status values only from Active, Pending,
+    Expired, Suspended, None.
+  - Avoid long values such as Marketing Authorisation Application, Conditional Marketing
+    Licence, Regulatory Review In Progress, or Licence Pending Final Approval.
+expected_output:
+- Conceptual data model
+- Logical data model
+- Physical PostgreSQL data model
+- SQL DDL scripts
+- Table relationships
+- Fact and dimension design
+- Synthetic data generation support
+- Excel output with sample synthetic data
+- PostgreSQL loading support

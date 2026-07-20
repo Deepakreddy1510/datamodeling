@@ -1,3 +1,20 @@
+<<<<<<< HEAD
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+=======
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -221,3 +238,4 @@ __marimo__/
 output/
 input/business_input.yaml
 .DS_Store
+>>>>>>> personal/main

@@ -1,3 +1,7 @@
+<<<<<<< HEAD
+import copy
+=======
+>>>>>>> personal/main
 import re
 
 try:
@@ -14,6 +18,13 @@ class DDLParserError(Exception):
 
 CREATE_SCHEMA_RE = re.compile(r"CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w\".]+)", re.IGNORECASE)
 CREATE_TABLE_RE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w\".]+)\s*\((.*)\)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
+<<<<<<< HEAD
+LIKE_TABLE_RE = re.compile(
+    r'^LIKE\s+([\w\".]+)(?P<options>(?:\s+(?:INCLUDING|EXCLUDING)\s+(?:COMMENTS|COMPRESSION|CONSTRAINTS|DEFAULTS|GENERATED|IDENTITY|INDEXES|STATISTICS|STORAGE|ALL))*)\s*$',
+    re.IGNORECASE,
+)
+=======
+>>>>>>> personal/main
 SUPPORTED_TYPE_RE = re.compile(
     r"^(character\s+varying|varchar|character|char|text|smallserial|smallint|integer|int|bigserial|bigint|serial|uuid|jsonb|json|date|time|timestamptz|timestamp(?:\s+with(?:out)?\s+time\s+zone)?|boolean|bool|numeric|decimal|double\s+precision|real|float)(?:\s*\([^)]*\))?(?=\s|,|$)",
     re.IGNORECASE,
@@ -61,12 +72,25 @@ def _parse_column_list(text):
 
 
 def _parse_references(text):
+<<<<<<< HEAD
+    match = re.search(
+        r'REFERENCES\s+([\w".]+)(?:\s*\(([^)]+)\))?',
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        raise DDLParserError(f"Unsupported REFERENCES clause: {text}")
+    _, table_name = _split_qualified_name(match.group(1))
+    parent_columns = _parse_column_list(match.group(2)) if match.group(2) else []
+    return table_name, parent_columns
+=======
     match = re.search(r"REFERENCES\s+([\w\".]+)\s*\(([^)]+)\)", text, re.IGNORECASE)
     if not match:
         raise DDLParserError(f"Unsupported REFERENCES clause: {text}")
     _, table_name = _split_qualified_name(match.group(1))
     return table_name, _parse_column_list(match.group(2))
 
+>>>>>>> personal/main
 
 
 def _constraint_name(original):
@@ -104,10 +128,29 @@ def _parse_table_constraint(part, table):
     if pk_match:
         table.primary_key = _parse_column_list(pk_match.group(1))
         return
+<<<<<<< HEAD
+    fk_match = re.search(
+        r'FOREIGN\s+KEY\s*\(([^)]+)\)\s+REFERENCES\s+([\w".]+)(?:\s*\(([^)]+)\))?',
+        text,
+        re.IGNORECASE,
+    )
+    if fk_match:
+        _, parent_table = _split_qualified_name(fk_match.group(2))
+        parent_columns = _parse_column_list(fk_match.group(3)) if fk_match.group(3) else []
+        table.foreign_keys.append(
+            ForeignKey(
+                table.name,
+                _parse_column_list(fk_match.group(1)),
+                parent_table,
+                parent_columns,
+            )
+        )
+=======
     fk_match = re.search(r"FOREIGN\s+KEY\s*\(([^)]+)\)\s+REFERENCES\s+([\w\".]+)\s*\(([^)]+)\)", text, re.IGNORECASE)
     if fk_match:
         _, parent_table = _split_qualified_name(fk_match.group(2))
         table.foreign_keys.append(ForeignKey(table.name, _parse_column_list(fk_match.group(1)), parent_table, _parse_column_list(fk_match.group(3))))
+>>>>>>> personal/main
         return
     unique_match = re.search(r"UNIQUE\s*\(([^)]+)\)", text, re.IGNORECASE)
     if unique_match:
@@ -128,6 +171,62 @@ def _parse_table_constraint(part, table):
     raise DDLParserError(f"Unsupported table constraint: {part}")
 
 
+<<<<<<< HEAD
+def _copy_like_table(part, table, model):
+    """Apply PostgreSQL CREATE TABLE ... (LIKE source INCLUDING/EXCLUDING ...)."""
+    match = LIKE_TABLE_RE.fullmatch(part.strip())
+    if not match:
+        return False
+
+    source_schema, source_name = _split_qualified_name(match.group(1))
+    candidates = [source_name.lower()]
+    if source_schema:
+        candidates.insert(0, f"{source_schema}.{source_name}".lower())
+    table_map = model.table_map()
+    source = next((table_map[name] for name in candidates if name in table_map), None)
+    if source is None:
+        raise DDLParserError(
+            f"CREATE TABLE {table.full_name} uses LIKE for unknown or not-yet-parsed "
+            f"table {match.group(1)}."
+        )
+
+    options = match.group("options").upper()
+    include_all = "INCLUDING ALL" in options
+    excluded = {name.upper() for name in re.findall(r"EXCLUDING\s+(\w+)", options, re.IGNORECASE)}
+
+    # PostgreSQL LIKE always copies column names/types/not-null. Other properties
+    # are copied only when requested, with INCLUDING ALL acting as the superset.
+    table.columns.extend(copy.deepcopy(source.columns))
+    if not include_all and "CONSTRAINTS" not in options:
+        for column in table.columns:
+            column.is_primary_key = False
+    if include_all or "CONSTRAINTS" in options:
+        if "CONSTRAINTS" not in excluded and "ALL" not in excluded:
+            table.primary_key = copy.deepcopy(source.primary_key)
+            copied_foreign_keys = copy.deepcopy(source.foreign_keys)
+            for foreign_key in copied_foreign_keys:
+                foreign_key.child_table = table.name
+            table.foreign_keys.extend(copied_foreign_keys)
+            table.unique_constraints.extend(copy.deepcopy(source.unique_constraints))
+            table.check_constraints.extend(copy.deepcopy(source.check_constraints))
+    if not include_all and "DEFAULTS" not in options:
+        for column in table.columns:
+            column.default = None
+    if "DEFAULTS" in excluded or "ALL" in excluded:
+        for column in table.columns:
+            column.default = None
+    if not include_all and "IDENTITY" not in options:
+        # Identity metadata is represented by the parser as a missing/defaulted
+        # integer PK and is rebuilt safely by postgres_loader._column_ddl.
+        pass
+
+    table.ignored_constraints.extend(copy.deepcopy(source.ignored_constraints))
+    table.warnings.extend(copy.deepcopy(source.warnings))
+    return True
+
+
+=======
+>>>>>>> personal/main
 def _parse_column(part, table):
     match = re.match(r"([\w\"]+)\s+(.+)$", part.strip(), re.DOTALL)
     if not match:
@@ -159,8 +258,13 @@ def _parse_column(part, table):
     if ref_match:
         parent_table, parent_columns = _parse_references(constraints)
         column.references_table = parent_table
+<<<<<<< HEAD
+        column.references_column = parent_columns[0] if parent_columns else None
+        table.foreign_keys.append(ForeignKey(table.name, [name], parent_table, parent_columns))
+=======
         column.references_column = parent_columns[0]
         table.foreign_keys.append(ForeignKey(table.name, [name], parent_table, [parent_columns[0]]))
+>>>>>>> personal/main
     if re.search(r"\bUNIQUE\b", constraints, re.IGNORECASE):
         table.unique_constraints.append(UniqueConstraint([name]))
     inline_check = re.search(r"\bCHECK\s*\((.+)\)", constraints, re.IGNORECASE | re.DOTALL)
@@ -201,6 +305,47 @@ def _split_statements(ddl_text):
     return statements
 
 
+<<<<<<< HEAD
+
+def _resolve_implicit_reference_columns(model):
+    """Resolve REFERENCES table clauses that omit the primary-key column list."""
+    table_map = model.table_map()
+    for table in model.tables:
+        for foreign_key in table.foreign_keys:
+            if foreign_key.parent_columns:
+                continue
+            parent = table_map.get(foreign_key.parent_table.lower())
+            if parent is None:
+                raise DDLParserError(
+                    f"Foreign key on {table.name} references unknown table "
+                    f"{foreign_key.parent_table}."
+                )
+            if not parent.primary_key:
+                raise DDLParserError(
+                    f"REFERENCES {foreign_key.parent_table} omits a column list, "
+                    "but the referenced table has no parsed primary key."
+                )
+            if len(foreign_key.child_columns) != len(parent.primary_key):
+                raise DDLParserError(
+                    f"Foreign key on {table.name} has {len(foreign_key.child_columns)} "
+                    f"column(s), but {foreign_key.parent_table} has a "
+                    f"{len(parent.primary_key)}-column primary key."
+                )
+            foreign_key.parent_columns = list(parent.primary_key)
+            for child_column, parent_column in zip(
+                foreign_key.child_columns, foreign_key.parent_columns
+            ):
+                column = next(
+                    (item for item in table.columns if item.name == child_column),
+                    None,
+                )
+                if column is not None:
+                    column.references_table = foreign_key.parent_table
+                    column.references_column = parent_column
+
+
+=======
+>>>>>>> personal/main
 def parse_ddl(ddl_text):
     model = DDLModel()
     statements = _split_statements(ddl_text)
@@ -218,6 +363,11 @@ def parse_ddl(ddl_text):
             table = Table(name=table_name, schema=schema)
             for part in _split_top_level_commas(table_match.group(2)):
                 normalized = part.strip()
+<<<<<<< HEAD
+                if _copy_like_table(normalized, table, model):
+                    continue
+=======
+>>>>>>> personal/main
                 if re.match(r"^CONSTRAINT\b|^(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK)\b", normalized, re.IGNORECASE):
                     _parse_table_constraint(normalized, table)
                 else:
@@ -236,4 +386,8 @@ def parse_ddl(ddl_text):
             raise DDLParserError(f"Unsupported DDL statement: {statement[:120]}")
     if not model.tables:
         raise DDLParserError("No CREATE TABLE statements were parsed from DDL.")
+<<<<<<< HEAD
+    _resolve_implicit_reference_columns(model)
+=======
+>>>>>>> personal/main
     return model

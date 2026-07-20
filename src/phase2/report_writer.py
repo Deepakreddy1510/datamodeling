@@ -14,7 +14,11 @@ def _overall_status(*statuses):
     return "passed"
 
 
+<<<<<<< HEAD
+def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation, pipeline_plan=None, codex_assumptions=None, codex_sql_artifact=None, elt_execution=None, lineage_validation=None):
+=======
 def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, rows_per_table, excel_output, validation):
+>>>>>>> personal/main
     stats = validation.get("generation_stats", {})
     final_status = _overall_status(validation.get("status"), "passed_with_warnings" if getattr(model, "warnings", []) else None)
     lines = [
@@ -35,6 +39,56 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     for table in model.tables:
         lines.append(f"| {table.full_name} | {len(table.columns)} | {', '.join(table.primary_key) or 'None'} | {len(table.foreign_keys)} |")
 
+<<<<<<< HEAD
+    if pipeline_plan:
+        lines.extend(["", "## Warehouse Pipeline Classification", ""])
+        lines.append(f"- Raw/load tables: {', '.join(pipeline_plan.get('raw_tables', [])) or 'None'}")
+        lines.append(f"- Staging tables: {', '.join(pipeline_plan.get('staging_tables', [])) or 'None'}")
+        lines.append(f"- Dimension tables: {', '.join(pipeline_plan.get('dimension_tables', [])) or 'None'}")
+        lines.append(f"- Fact tables: {', '.join(pipeline_plan.get('fact_tables', [])) or 'None'}")
+        lines.append(f"- Other tables: {', '.join(pipeline_plan.get('other_tables', [])) or 'None'}")
+        lines.extend(["", "## Warehouse Lineage Plan", ""])
+        for target, sources in pipeline_plan.get('lineage', {}).items():
+            lines.append(f"- {target}: {', '.join(sources) or 'None'}")
+        if pipeline_plan.get('warnings'):
+            lines.extend(["", "### Pipeline Plan Warnings", ""])
+            lines.extend([f"- {warning}" for warning in pipeline_plan.get('warnings', [])])
+    generation_profile = validation.get("generation_profile") or {}
+    if generation_profile:
+        lines.extend(["", "## Realistic Generation Profile", ""])
+        lines.append(f"- Main business-event target: {generation_profile.get('base_event_rows', rows_per_table)}")
+        lines.append(f"- Target date span: {generation_profile.get('date_span_days', 0)} days")
+        lines.extend(["", "| Raw/Load Table | Category | Target Rows | Mapped Staging |", "|---|---|---:|---|"])
+        profiles = generation_profile.get("table_profiles", {})
+        for table_name, count in generation_profile.get("raw_table_row_counts", {}).items():
+            profile = profiles.get(table_name, {})
+            lines.append(
+                f"| {table_name} | {profile.get('category', 'general')} | {count} | "
+                f"{', '.join(profile.get('mapped_staging_tables', [])) or 'None'} |"
+            )
+        lines.append(f"- Relationship reuse rules: {len(generation_profile.get('relationships', []))}")
+
+    if codex_assumptions is not None:
+        lines.extend(["", "## Codex ELT Assumptions", ""])
+        lines.extend([f"- {item}" for item in codex_assumptions] or ["- None"])
+    if codex_sql_artifact:
+        lines.extend(["", "## Codex SQL Artifact", "", f"- `{codex_sql_artifact}`"])
+    if elt_execution:
+        lines.extend(["", "## ELT Execution Summary", ""])
+        lines.append(f"- SQL execution status: {elt_execution.get('status', 'unknown')}")
+        lines.append(f"- Transaction status: {elt_execution.get('transaction_status', 'unknown')}")
+        lines.extend(["", "### Raw/Load Inserted Rows", "", "| Table | Rows |", "|---|---:|"])
+        for table, count in elt_execution.get('inserted_rows', {}).items():
+            lines.append(f"| {table} | {count} |")
+        lines.extend(["", "### Final Row Counts by Table", "", "| Table | Rows |", "|---|---:|"])
+        for table, count in elt_execution.get('transformed_rows', {}).items():
+            lines.append(f"| {table} | {count} |")
+    if lineage_validation:
+        lines.extend(["", "## Lineage Validation Summary", "", f"- Status: **{lineage_validation.get('status', 'unknown')}**"])
+        lines.extend([f"- {error}" for error in lineage_validation.get('errors', [])] or ["- No lineage errors."])
+
+=======
+>>>>>>> personal/main
     lines.extend(["", "## Ignored Constraints / Warnings", ""])
     ignored = []
     for table in model.tables:
@@ -101,28 +155,51 @@ def write_generation_report(path, *, yaml_path, phase1_output, ddl_text, model, 
     write_text(path, lines)
 
 
+<<<<<<< HEAD
+def write_postgres_report(path, load_requested, result, skipped_reason=None):
+=======
 def write_postgres_report(path, load_requested, result):
+>>>>>>> personal/main
     lines = ["# PostgreSQL Load Report", "", f"- Load requested: {load_requested}", ""]
     if not load_requested:
         lines.append("PostgreSQL load was skipped because `--no-load-to-postgres` was used or `--load-to-postgres` was not passed.")
     else:
+<<<<<<< HEAD
+        reason = skipped_reason or result.get("skipped_reason")
+=======
+>>>>>>> personal/main
         lines.extend([
             f"- Final status: **{result.get('status', 'unknown')}**",
             f"- Target schema: `{result.get('target_schema', '')}`",
             f"- Schema creation status: {result.get('schema_creation_status', 'not_attempted')}",
             f"- Table creation status: {result.get('table_creation_status', 'not_attempted')}",
             f"- Transaction status: {result.get('transaction_status', 'unknown')}",
+<<<<<<< HEAD
+        ])
+        if reason:
+            lines.extend(["", "## Execution Skipped", "", f"- {reason}"])
+        lines.extend(["", "## Inserted Rows", "", "| Table | Rows Inserted |", "|---|---:|"])
+        for table, count in result.get("inserted_rows", {}).items():
+            lines.append(f"| {table} | {count} |")
+        if not result.get("inserted_rows"):
+            lines.append("| None | 0 |")
+=======
             "", "## Inserted Rows", "", "| Table | Rows Inserted |", "|---|---:|",
         ])
         for table, count in result.get("inserted_rows", {}).items():
             lines.append(f"| {table} | {count} |")
+>>>>>>> personal/main
         if result.get("errors"):
             lines.extend(["", "## Errors", ""])
             lines.extend([f"- {error}" for error in result["errors"]])
     write_text(path, lines)
 
 
+<<<<<<< HEAD
+def write_validation_report(path, pre_validation, post_validation=None, lineage_validation=None):
+=======
 def write_validation_report(path, pre_validation, post_validation=None):
+>>>>>>> personal/main
     final_status = _overall_status(pre_validation.get("status"), post_validation.get("status") if post_validation else None)
     stats = pre_validation.get("generation_stats", {})
     lines = ["# Validation Report", "", f"- Final status: **{final_status}**", f"- DDL validation status: **{'failed' if pre_validation.get('errors') else 'passed'}**", f"- Fallback inference count: {stats.get('fallback_to_ddl_inference_count', 0)}", f"- Semantic type count: {len(stats.get('semantic_types', {}))}", f"- Placeholder warning count: {len(pre_validation.get('placeholder_warnings', []))}", f"- Semantic placeholder validation status: **{'failed' if pre_validation.get('semantic_placeholder_errors') else 'passed'}**", "", "## Pre-load Validation", "", f"Status: **{pre_validation['status']}**", ""]
@@ -160,6 +237,34 @@ def write_validation_report(path, pre_validation, post_validation=None):
         lines.append("| None | 0 |")
     lines.extend(["", "## Unsupported Calculation Rules", ""])
     lines.extend([f"- {item}" for item in stats.get("calculation_warnings", [])] or ["- None"])
+<<<<<<< HEAD
+    lines.extend(["", "## Lineage Validation", ""])
+    if lineage_validation is None:
+        lineage_validation = pre_validation.get("lineage_validation")
+    if lineage_validation is None:
+        lines.append("Lineage validation was skipped.")
+    else:
+        lines.append(f"Status: **{lineage_validation.get('status', 'unknown')}**")
+        lines.extend([f"- {item}" for item in lineage_validation.get("errors", [])] or ["- No lineage errors."])
+        if lineage_validation.get("warnings"):
+            lines.extend(["", "### Lineage Warnings", ""])
+            lines.extend([f"- {item}" for item in lineage_validation.get("warnings", [])])
+        if lineage_validation.get("checks"):
+            lines.extend(["", "### Lineage Checks", ""])
+            lines.extend([f"- {item}" for item in lineage_validation.get("checks", [])])
+
+    lines.extend(["", "## Data Realism Validation", ""])
+    realism = pre_validation.get("realism_validation")
+    if realism is None:
+        lines.append("Data realism validation was not available for this generation path.")
+    else:
+        lines.append(f"Status: **{realism.get('status', 'unknown')}**")
+        lines.extend([f"- Error: {item}" for item in realism.get("errors", [])])
+        lines.extend([f"- Warning: {item}" for item in realism.get("warnings", [])])
+        lines.extend([f"- Check: {item}" for item in realism.get("checks", [])] or ["- No realism checks were recorded."])
+
+=======
+>>>>>>> personal/main
     lines.extend(["", "## PostgreSQL Validation", ""])
     if post_validation is None:
         lines.append("PostgreSQL validation was skipped because no database load was requested.")

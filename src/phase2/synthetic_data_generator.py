@@ -42,6 +42,11 @@ except ImportError:  # pragma: no cover - exercised when optional dependency is 
 
 from .semantic_context import build_semantic_context
 from .reference_data_resolver import ReferenceDataResolver
+<<<<<<< HEAD
+from .warehouse_pipeline_planner import build_warehouse_pipeline_plan
+from .warehouse_generation_profile import build_warehouse_generation_profile, TECHNICAL_COLUMNS
+=======
+>>>>>>> personal/main
 
 
 class SyntheticDataError(Exception):
@@ -762,7 +767,17 @@ def _fallback_value(fake, rng, table, column, index, stats, semantic_context=Non
             return rng.randint(1, 25)
         return rng.randint(1, 1000)
     if _is_numeric_type(column):
+<<<<<<< HEAD
+        if any(word in name for word in ["rate", "percentage", "ratio", "score"]):
+            upper_bound = 100
+        elif any(word in name for word in ["amount", "price", "cost", "revenue", "total", "margin", "value"]):
+            upper_bound = 10000
+        else:
+            upper_bound = 1000
+        return _numeric_value(rng, column, stats, 0, upper_bound)
+=======
         return _numeric_value(rng, column, stats, 0, 100 if any(word in name for word in ["rate", "percentage", "ratio", "score"]) else None)
+>>>>>>> personal/main
 
     if reference_resolver is not None and any(token in dtype for token in ["char", "text"]) and semantic_type in {"status", "category", "type", "method", "role", "position", "priority", "country", "nationality"}:
         reference_values, reference_key = reference_resolver.resolve(table.name, column.name, semantic_type)
@@ -892,6 +907,58 @@ def _finalize_row_values(table, row, index, stats):
         row[column.name] = finalize_generated_value(table, column, row.get(column.name), index, row, stats)
 
 
+<<<<<<< HEAD
+def _json_compatible(value):
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (datetime, date, dt_time)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_compatible(item) for item in value]
+    return value
+
+
+def _align_raw_payloads_with_staging(model, generated, pipeline_plan, stats):
+    """Populate generic raw JSON envelopes from their mapped staging records."""
+    table_map = {table.name: table for table in model.tables}
+    aligned = set()
+    for staging_name in pipeline_plan.get("staging_tables", []):
+        staging = table_map[staging_name]
+        sources = [
+            source for source in pipeline_plan.get("lineage", {}).get(staging_name, [])
+            if source in pipeline_plan.get("raw_tables", [])
+        ]
+        for raw_name in sources:
+            raw = table_map[raw_name]
+            if not any(
+                column.name.lower() == "source_payload"
+                and column.data_type.lower() in {"json", "jsonb"}
+                for column in raw.columns
+            ):
+                continue
+            raw_rows = generated.get(raw_name, [])
+            staging_rows = generated.get(staging_name, [])
+            if not raw_rows or not staging_rows:
+                continue
+            payload_columns = [
+                column.name for column in staging.columns
+                if column.name.lower() not in TECHNICAL_COLUMNS
+                and not column.name.lower().endswith("_key")
+            ]
+            for index, raw_row in enumerate(raw_rows):
+                staging_row = staging_rows[index % len(staging_rows)]
+                raw_row["source_payload"] = _json_compatible({
+                    column: staging_row.get(column) for column in payload_columns
+                })
+            aligned.add(f"{raw_name} -> {staging_name}")
+    if aligned:
+        stats.setdefault("raw_payload_alignment_events", set()).update(aligned)
+
+
+=======
+>>>>>>> personal/main
 def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_context=None, business_input=None):
     fake = Faker()
     Faker.seed(seed)
@@ -900,6 +967,21 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
     table_map = model.table_map()
     if semantic_context is None:
         semantic_context = build_semantic_context(business_input or {}, model)
+<<<<<<< HEAD
+    pipeline_plan = build_warehouse_pipeline_plan(model, semantic_context)
+    use_warehouse_profile = bool(pipeline_plan.get("raw_tables") and pipeline_plan.get("staging_tables"))
+    generation_profile = (
+        build_warehouse_generation_profile(model, pipeline_plan, rows_per_table)
+        if use_warehouse_profile
+        else None
+    )
+    table_row_counts = (
+        generation_profile.get("table_row_counts", {})
+        if generation_profile
+        else {table.name: rows_per_table for table in model.tables}
+    )
+=======
+>>>>>>> personal/main
     reference_resolver = ReferenceDataResolver(business_input or {})
     entity_store = {}
     stats = {
@@ -927,17 +1009,31 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
         "incompatible_reuse_corrections": set(),
         "calculation_corrections": set(),
         "date_rule_corrections": set(),
+<<<<<<< HEAD
+        "raw_payload_alignment_events": set(),
+        "generation_profile": generation_profile or {},
+=======
+>>>>>>> personal/main
     }
     for semantic in getattr(semantic_context, "column_semantics", {}).values():
         stats["semantic_types"].setdefault(semantic.semantic_type, 0)
         stats["semantic_types"][semantic.semantic_type] += 1
 
     for table in table_generation_order(model):
+<<<<<<< HEAD
+        table_rows = table_row_counts.get(table.name, rows_per_table)
+        _detect_constraint_capacity(table, table_rows)
+        rows = []
+        seen_unique = defaultdict(set)
+        seen_primary_keys = set()
+        for index in range(1, table_rows + 1):
+=======
         _detect_constraint_capacity(table, rows_per_table)
         rows = []
         seen_unique = defaultdict(set)
         seen_primary_keys = set()
         for index in range(1, rows_per_table + 1):
+>>>>>>> personal/main
             row = {}
             for column in table.columns:
                 if column.max_length and column.name not in stats["length_limited_columns"]:
@@ -968,6 +1064,11 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
             rows.append(row)
         generated[table.name] = rows
     _finalize_calculations(model, generated, stats)
+<<<<<<< HEAD
+    if use_warehouse_profile:
+        _align_raw_payloads_with_staging(model, generated, pipeline_plan, stats)
+=======
+>>>>>>> personal/main
     stats["fallback_columns_used"] = sorted(stats["fallback_columns_used"])
     stats["calculated_columns"] = sorted(stats["calculated_columns"])
     stats["fk_safe_unique_adjustments"] = sorted(stats["fk_safe_unique_adjustments"])
@@ -982,5 +1083,11 @@ def generate_synthetic_data(model, rows_per_table=100, seed=12345, semantic_cont
     stats["incompatible_reuse_corrections"] = sorted(stats["incompatible_reuse_corrections"])
     stats["calculation_corrections"] = sorted(stats["calculation_corrections"])
     stats["date_rule_corrections"] = sorted(stats["date_rule_corrections"])
+<<<<<<< HEAD
+    stats["raw_payload_alignment_events"] = sorted(stats["raw_payload_alignment_events"])
     generated["__stats__"] = stats
+    generated["__expected_rows__"] = table_row_counts
+=======
+    generated["__stats__"] = stats
+>>>>>>> personal/main
     return generated

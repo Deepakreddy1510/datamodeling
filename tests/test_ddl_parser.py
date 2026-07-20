@@ -211,3 +211,75 @@ CREATE TABLE enum_array_check (
     assert check.operator == "IN"
     assert check.column == "status"
     assert check.values == ["Scheduled", "Completed"]
+<<<<<<< HEAD
+
+
+def test_parse_create_table_like_including_all_generically():
+    model = parse_ddl("""
+CREATE TABLE raw.load_base (
+  load_id bigint PRIMARY KEY,
+  source_payload jsonb NOT NULL,
+  source_system varchar(50),
+  loaded_at timestamptz DEFAULT now() NOT NULL
+);
+CREATE TABLE raw.load_event (
+  LIKE raw.load_base INCLUDING ALL
+);
+""")
+    base, event = model.tables
+    assert event.column_names() == base.column_names()
+    assert event.primary_key == ["load_id"]
+    assert event.columns[0].is_primary_key is True
+    assert event.columns[-1].default == "now()"
+
+
+def test_parse_create_table_like_without_constraints_does_not_copy_primary_key():
+    model = parse_ddl("""
+CREATE TABLE base_table (
+  id integer PRIMARY KEY,
+  payload jsonb DEFAULT '{}' NOT NULL
+);
+CREATE TABLE copied_table (
+  LIKE base_table INCLUDING DEFAULTS
+);
+""")
+    copied = model.tables[1]
+    assert copied.column_names() == ["id", "payload"]
+    assert copied.primary_key == []
+    assert copied.columns[0].is_primary_key is False
+    assert copied.columns[1].default == "'{}'"
+
+
+def test_references_without_column_list_infers_parent_primary_key():
+    model = parse_ddl("""
+CREATE TABLE stg_airport (
+  airport_id uuid PRIMARY KEY,
+  airport_name text NOT NULL
+);
+CREATE TABLE stg_route (
+  route_id uuid PRIMARY KEY,
+  origin_airport_id uuid NOT NULL REFERENCES stg_airport
+);
+""")
+    route = next(table for table in model.tables if table.name == "stg_route")
+    assert route.foreign_keys[0].parent_table == "stg_airport"
+    assert route.foreign_keys[0].parent_columns == ["airport_id"]
+    origin = next(column for column in route.columns if column.name == "origin_airport_id")
+    assert origin.references_column == "airport_id"
+
+
+def test_table_level_reference_without_column_list_infers_composite_safe_pk():
+    model = parse_ddl("""
+CREATE TABLE parent_entity (
+  parent_id integer PRIMARY KEY
+);
+CREATE TABLE child_entity (
+  child_id integer PRIMARY KEY,
+  parent_id integer,
+  FOREIGN KEY (parent_id) REFERENCES parent_entity
+);
+""")
+    child = next(table for table in model.tables if table.name == "child_entity")
+    assert child.foreign_keys[0].parent_columns == ["parent_id"]
+=======
+>>>>>>> personal/main

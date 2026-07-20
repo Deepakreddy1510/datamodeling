@@ -1,0 +1,95 @@
+{
+  "assumptions": [
+    "Technical warehouse tables are inferred from business entities and reporting requirements.",
+    "Surrogate keys are recommended for dimensions and facts should reference dimensions by keys."
+  ],
+  "fact_grains": {
+    "fact_claim": "one row per claim",
+    "fact_delivery": "one row per delivery record",
+    "fact_payment": "one row per payment transaction",
+    "fact_return": "one row per return transaction",
+    "fact_sales": "one row per order item",
+    "fact_transaction": "one row per transaction"
+  },
+  "inferred_dimension_tables": [
+    "dim_customer",
+    "dim_store",
+    "dim_product",
+    "dim_location",
+    "dim_date"
+  ],
+  "inferred_fact_tables": [
+    "fact_sales",
+    "fact_payment",
+    "fact_delivery",
+    "fact_return",
+    "fact_claim",
+    "fact_transaction"
+  ],
+  "inferred_load_tables": [
+    "load_entity_name_customer_description_a_person_who_registers_on_the_time_craft_website_and_places_watch_orders_raw",
+    "load_entity_name_brand_description_a_fictional_watch_brand_sold_through_the_online_store_raw",
+    "load_entity_name_collection_description_a_watch_collection_or_product_series_belonging_to_a_brand_raw",
+    "load_entity_name_watch_product_description_a_watch_item_available_for_customers_to_purchase_raw",
+    "load_entity_name_warehouse_description_a_fulfilment_location_that_stores_watches_and_dispatches_shipments_raw",
+    "load_entity_name_inventory_description_product_stock_availability_recorded_for_a_warehouse_on_a_specific_date_raw",
+    "load_entity_name_order_description_a_purchase_request_placed_by_a_customer_raw",
+    "load_entity_name_order_item_description_a_watch_product_line_item_inside_an_order_raw",
+    "load_entity_name_payment_description_a_payment_transaction_related_to_an_order_raw",
+    "load_entity_name_shipment_description_shipment_and_delivery_tracking_information_for_an_order_raw",
+    "load_entity_name_return_request_description_a_customer_request_to_return_part_or_all_of_an_order_item_raw",
+    "load_entity_name_warranty_claim_description_a_warranty_service_claim_raised_for_a_purchased_watch_raw"
+  ],
+  "inferred_staging_tables": [
+    "stg_entity_name_customer_description_a_person_who_registers_on_the_time_craft_website_and_places_watch_orders",
+    "stg_entity_name_brand_description_a_fictional_watch_brand_sold_through_the_online_store",
+    "stg_entity_name_collection_description_a_watch_collection_or_product_series_belonging_to_a_brand",
+    "stg_entity_name_watch_product_description_a_watch_item_available_for_customers_to_purchase",
+    "stg_entity_name_warehouse_description_a_fulfilment_location_that_stores_watches_and_dispatches_shipments",
+    "stg_entity_name_inventory_description_product_stock_availability_recorded_for_a_warehouse_on_a_specific_date",
+    "stg_entity_name_order_description_a_purchase_request_placed_by_a_customer",
+    "stg_entity_name_order_item_description_a_watch_product_line_item_inside_an_order",
+    "stg_entity_name_payment_description_a_payment_transaction_related_to_an_order",
+    "stg_entity_name_shipment_description_shipment_and_delivery_tracking_information_for_an_order",
+    "stg_entity_name_return_request_description_a_customer_request_to_return_part_or_all_of_an_order_item",
+    "stg_entity_name_warranty_claim_description_a_warranty_service_claim_raised_for_a_purchased_watch"
+  ],
+  "model_type": "analytical_data_warehouse",
+  "modeling_style": "dimensional_model",
+  "required_layers": [
+    "raw_load",
+    "staging",
+    "dimension",
+    "fact",
+    "reporting"
+  ],
+  "source_to_target_mapping_summary": [
+    "{'entity_name': 'Customer', 'description': 'A person who registers on the TimeCraft website and places watch orders.'} -> load_entity_name_customer_description_a_person_who_registers_on_the_time_craft_website_and_places_watch_orders_raw -> stg_entity_name_customer_description_a_person_who_registers_on_the_time_craft_website_and_places_watch_orders",
+    "{'entity_name': 'Brand', 'description': 'A fictional watch brand sold through the online store.'} -> load_entity_name_brand_description_a_fictional_watch_brand_sold_through_the_online_store_raw -> stg_entity_name_brand_description_a_fictional_watch_brand_sold_through_the_online_store",
+    "{'entity_name': 'Collection', 'description': 'A watch collection or product series belonging to a brand.'} -> load_entity_name_collection_description_a_watch_collection_or_product_series_belonging_to_a_brand_raw -> stg_entity_name_collection_description_a_watch_collection_or_product_series_belonging_to_a_brand",
+    "{'entity_name': 'Watch Product', 'description': 'A watch item available for customers to purchase.'} -> load_entity_name_watch_product_description_a_watch_item_available_for_customers_to_purchase_raw -> stg_entity_name_watch_product_description_a_watch_item_available_for_customers_to_purchase",
+    "{'entity_name': 'Warehouse', 'description': 'A fulfilment location that stores watches and dispatches shipments.'} -> load_entity_name_warehouse_description_a_fulfilment_location_that_stores_watches_and_dispatches_shipments_raw -> stg_entity_name_warehouse_description_a_fulfilment_location_that_stores_watches_and_dispatches_shipments",
+    "{'entity_name': 'Inventory', 'description': 'Product stock availability recorded for a warehouse on a specific date.'} -> load_entity_name_inventory_description_product_stock_availability_recorded_for_a_warehouse_on_a_specific_date_raw -> stg_entity_name_inventory_description_product_stock_availability_recorded_for_a_warehouse_on_a_specific_date",
+    "{'entity_name': 'Order', 'description': 'A purchase request placed by a customer.'} -> load_entity_name_order_description_a_purchase_request_placed_by_a_customer_raw -> stg_entity_name_order_description_a_purchase_request_placed_by_a_customer",
+    "{'entity_name': 'Order Item', 'description': 'A watch product line item inside an order.'} -> load_entity_name_order_item_description_a_watch_product_line_item_inside_an_order_raw -> stg_entity_name_order_item_description_a_watch_product_line_item_inside_an_order",
+    "{'entity_name': 'Payment', 'description': 'A payment transaction related to an order.'} -> load_entity_name_payment_description_a_payment_transaction_related_to_an_order_raw -> stg_entity_name_payment_description_a_payment_transaction_related_to_an_order",
+    "{'entity_name': 'Shipment', 'description': 'Shipment and delivery tracking information for an order.'} -> load_entity_name_shipment_description_shipment_and_delivery_tracking_information_for_an_order_raw -> stg_entity_name_shipment_description_shipment_and_delivery_tracking_information_for_an_order",
+    "{'entity_name': 'Return Request', 'description': 'A customer request to return part or all of an order item.'} -> load_entity_name_return_request_description_a_customer_request_to_return_part_or_all_of_an_order_item_raw -> stg_entity_name_return_request_description_a_customer_request_to_return_part_or_all_of_an_order_item",
+    "{'entity_name': 'Warranty Claim', 'description': 'A warranty service claim raised for a purchased watch.'} -> load_entity_name_warranty_claim_description_a_warranty_service_claim_raised_for_a_purchased_watch_raw -> stg_entity_name_warranty_claim_description_a_warranty_service_claim_raised_for_a_purchased_watch"
+  ],
+  "suggested_dimension_keys": [
+    "customer_key",
+    "store_key",
+    "product_key",
+    "location_key",
+    "date_key"
+  ],
+  "suggested_measures": [
+    "quantity",
+    "unit_price",
+    "payment_amount",
+    "amount",
+    "price",
+    "order_total_amount"
+  ]
+}

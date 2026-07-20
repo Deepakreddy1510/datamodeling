@@ -1,0 +1,536 @@
+business_name: Global Football Championship Analytics
+
+business_type: International Football Tournament Operations and Performance Analytics
+
+target_database: PostgreSQL
+
+business_description: >
+  Global Football Championship Analytics is a tournament analytics platform for
+  managing and analyzing international football competitions. The business wants
+  visibility into teams, players, venues, matches, match events, referee assignments,
+  ticket sales, broadcast viewership, sponsorship revenue, player performance,
+  team performance, attendance, and tournament operations.
+
+model_purpose: >
+  Create a data model that helps tournament organizers analyze match performance,
+  team standings, player statistics, venue utilization, ticket revenue, broadcast
+  revenue, sponsorship value, referee assignments, match events, and fan attendance.
+  The model should support analytical reporting, synthetic data generation, Excel
+  output, and PostgreSQL loading.
+
+main_business_processes:
+  - Tournament and competition setup
+  - Team registration and squad management
+  - Player profile and roster management
+  - Venue and stadium scheduling
+  - Match scheduling and match operations
+  - Match event tracking
+  - Referee and official assignment
+  - Ticket sales and attendance tracking
+  - Broadcast viewership tracking
+  - Sponsorship contract tracking
+  - Team, player, and tournament performance reporting
+
+key_business_entities:
+  - entity_name: Competition
+    description: A football tournament or championship season.
+
+  - entity_name: Team
+    description: A national or club football team participating in the competition.
+
+  - entity_name: Player
+    description: A football player registered with a participating team.
+
+  - entity_name: Venue
+    description: A stadium or football venue where matches are played.
+
+  - entity_name: Match
+    description: A football match between two teams in the competition.
+
+  - entity_name: Match Squad
+    description: A player's participation record for a specific match.
+
+  - entity_name: Match Event
+    description: An in-game event such as goal, assist, yellow card, red card, substitution, or penalty.
+
+  - entity_name: Referee
+    description: A match official assigned to tournament matches.
+
+  - entity_name: Match Official
+    description: Assignment of referees and officials to a specific match.
+
+  - entity_name: Ticket Sale
+    description: Ticket sales and revenue information for a match.
+
+  - entity_name: Broadcast Viewership
+    description: Broadcast audience and revenue information for a match.
+
+  - entity_name: Sponsorship
+    description: Sponsorship contracts connected to the competition.
+
+business_relationships:
+  - relationship_name: Competition has Teams
+    description: One competition can include many participating teams.
+
+  - relationship_name: Team has Players
+    description: One team can have many registered players.
+
+  - relationship_name: Competition schedules Matches
+    description: One competition can schedule many matches.
+
+  - relationship_name: Venue hosts Matches
+    description: One venue can host many matches.
+
+  - relationship_name: Match has Home Team
+    description: Each match has one home team.
+
+  - relationship_name: Match has Away Team
+    description: Each match has one away team.
+
+  - relationship_name: Match has Match Squads
+    description: One match can include many player participation records.
+
+  - relationship_name: Match has Match Events
+    description: One match can have many recorded match events.
+
+  - relationship_name: Player creates Match Events
+    description: One player can be linked to many match events.
+
+  - relationship_name: Match has Officials
+    description: One match can have many assigned officials.
+
+  - relationship_name: Match has Ticket Sales
+    description: One match can have many ticket sale records.
+
+  - relationship_name: Match has Broadcast Viewership
+    description: One match can have many broadcast viewership records.
+
+  - relationship_name: Competition has Sponsorships
+    description: One competition can have many sponsorship contracts.
+
+entity_attributes:
+  Competition:
+    - competition_id
+    - competition_name
+    - host_country
+    - season_year
+    - start_date
+    - end_date
+    - competition_status
+
+  Team:
+    - team_id
+    - competition_id
+    - team_name
+    - country
+    - confederation
+    - coach_name
+    - team_rank
+    - is_active
+
+  Player:
+    - player_id
+    - team_id
+    - player_name
+    - position
+    - jersey_number
+    - date_of_birth
+    - nationality
+    - preferred_foot
+    - is_active
+
+  Venue:
+    - venue_id
+    - venue_name
+    - city
+    - country
+    - capacity
+    - stadium_type
+    - is_active
+
+  Match:
+    - match_id
+    - competition_id
+    - venue_id
+    - match_date
+    - match_stage
+    - match_status
+    - home_team_id
+    - away_team_id
+    - home_score
+    - away_score
+    - attendance_count
+    - match_revenue
+
+  "Match Squad":
+    - squad_id
+    - match_id
+    - team_id
+    - player_id
+    - starting_eleven_flag
+    - captain_flag
+    - minutes_played
+
+  "Match Event":
+    - event_id
+    - match_id
+    - team_id
+    - player_id
+    - event_time_minute
+    - event_type
+    - event_outcome
+
+  Referee:
+    - referee_id
+    - referee_name
+    - nationality
+    - referee_role
+    - experience_years
+    - is_active
+
+  "Match Official":
+    - official_assignment_id
+    - match_id
+    - referee_id
+    - official_role
+
+  "Ticket Sale":
+    - ticket_sale_id
+    - match_id
+    - ticket_category
+    - tickets_sold
+    - ticket_price
+    - sale_amount
+    - sale_date
+
+  "Broadcast Viewership":
+    - broadcast_id
+    - match_id
+    - broadcaster_name
+    - region
+    - platform_type
+    - viewers_count
+    - broadcast_revenue
+
+  Sponsorship:
+    - sponsorship_id
+    - competition_id
+    - sponsor_name
+    - sponsor_category
+    - contract_amount
+    - start_date
+    - end_date
+    - is_active
+
+reporting_requirements:
+  - report_name: Match Performance Report
+    description: Show match results, goals scored, attendance, match revenue, and match status by stage and venue.
+
+  - report_name: Team Performance Report
+    description: Show wins, losses, draws, goals scored, goals conceded, points, and progression by team.
+
+  - report_name: Player Performance Report
+    description: Show goals, assists, cards, minutes played, starts, and captain appearances by player and team.
+
+  - report_name: Venue Utilization Report
+    description: Show matches hosted, attendance, capacity utilization, and revenue by venue and city.
+
+  - report_name: Ticket Revenue Report
+    description: Show tickets sold, ticket revenue, and average ticket price by match, category, venue, and stage.
+
+  - report_name: Broadcast Viewership Report
+    description: Show viewers, platform type, broadcaster, region, and broadcast revenue by match and stage.
+
+  - report_name: Sponsorship Revenue Report
+    description: Show sponsorship contract value by sponsor category, competition, and active contract status.
+
+  - report_name: Referee Assignment Report
+    description: Show referee assignments, roles, experience, and match count by official.
+
+expected_output:
+  - Conceptual data model
+  - Logical data model
+  - Physical PostgreSQL data model
+  - SQL DDL scripts
+  - Load tables
+  - Staging tables
+  - Dimension tables
+  - Fact tables
+  - Reporting views
+  - Table relationships
+  - Synthetic data generation support
+  - Excel output with sample synthetic data
+  - PostgreSQL loading support
+
+modeling_guidelines:
+  unique_constraints:
+    use_unique_only_for:
+      - primary keys
+      - true business identifiers
+      - competition_id
+      - team_id
+      - player_id
+      - venue_id
+      - match_id
+      - event_id
+      - referee_id
+      - ticket_sale_id
+      - broadcast_id
+      - sponsorship_id
+
+    never_unique_for_low_cardinality_fields:
+      - competition_status
+      - match_status
+      - match_stage
+      - event_type
+      - event_outcome
+      - position
+      - preferred_foot
+      - confederation
+      - country
+      - city
+      - stadium_type
+      - referee_role
+      - official_role
+      - ticket_category
+      - platform_type
+      - sponsor_category
+      - is_active
+      - starting_eleven_flag
+      - captain_flag
+
+semantic_data_context:
+  domain: football_tournament_analytics
+  competition_entity: Competition
+  team_entity: Team
+  player_entity: Player
+  venue_entity: Venue
+  match_entity: Match
+  match_participation_entity: Match Squad
+  event_entity: Match Event
+  referee_entity: Referee
+  ticket_entity: Ticket Sale
+  broadcast_entity: Broadcast Viewership
+  sponsorship_entity: Sponsorship
+
+synthetic_data_requirements:
+  realism_level: high
+  locale: en_US
+
+  date_range:
+    start_date: "2024-01-01"
+    end_date: "2026-12-31"
+
+  consistency_rules:
+    competition:
+      end_date_should_be_after_start_date: true
+
+    team:
+      team_country_should_match_confederation: true
+      is_active_should_be_boolean: true
+
+    player:
+      player_team_should_exist: true
+      jersey_number_should_be_between_1_and_99: true
+      is_active_should_be_boolean: true
+
+    venue:
+      capacity_should_be_positive: true
+      venue_city_should_match_country: true
+
+    match:
+      match_date_should_be_within_competition_dates: true
+      home_team_and_away_team_should_be_different: true
+      attendance_should_not_exceed_venue_capacity: true
+      scores_should_be_non_negative: true
+
+    match_squad:
+      player_should_belong_to_match_team: true
+      minutes_played_should_be_between_0_and_120: true
+      starting_eleven_flag_should_be_boolean: true
+      captain_flag_should_be_boolean: true
+
+    match_event:
+      event_minute_should_be_between_0_and_120: true
+      event_player_should_belong_to_match_team: true
+
+    ticket_sale:
+      sale_amount_should_equal_tickets_sold_times_ticket_price: true
+      sale_date_should_be_on_or_before_match_date: true
+
+    broadcast:
+      viewers_count_should_be_positive: true
+      broadcast_revenue_should_be_positive: true
+
+    sponsorship:
+      contract_amount_should_be_positive: true
+      end_date_should_be_after_start_date: true
+      is_active_should_be_boolean: true
+
+    relationships:
+      enforce_primary_keys: true
+      enforce_foreign_keys: true
+      enforce_unique_constraints: true
+      enforce_check_constraints: true
+
+reference_data:
+  competition_statuses:
+    - Scheduled
+    - Active
+    - Completed
+    - Cancelled
+
+  confederations:
+    - AFC
+    - CAF
+    - CONCACAF
+    - CONMEBOL
+    - OFC
+    - UEFA
+
+  team_countries:
+    AFC:
+      - Japan
+      - South Korea
+      - India
+      - Australia
+      - Saudi Arabia
+    CAF:
+      - Egypt
+      - Morocco
+      - Nigeria
+      - Ghana
+      - Senegal
+    CONCACAF:
+      - United States
+      - Mexico
+      - Canada
+      - Costa Rica
+      - Jamaica
+    CONMEBOL:
+      - Brazil
+      - Argentina
+      - Uruguay
+      - Colombia
+      - Chile
+    OFC:
+      - New Zealand
+      - Fiji
+      - Tahiti
+      - Samoa
+    UEFA:
+      - England
+      - France
+      - Germany
+      - Spain
+      - Italy
+      - Portugal
+      - Netherlands
+
+  player_positions:
+    - Goalkeeper
+    - Defender
+    - Midfielder
+    - Forward
+
+  preferred_foot:
+    - Left
+    - Right
+    - Both
+
+  stadium_types:
+    - National Stadium
+    - Club Stadium
+    - Multi-Purpose Stadium
+    - Arena
+
+  match_stages:
+    - Group Stage
+    - Round of 16
+    - Quarter Final
+    - Semi Final
+    - Third Place Playoff
+    - Final
+
+  match_statuses:
+    - Scheduled
+    - In Progress
+    - Completed
+    - Postponed
+    - Cancelled
+
+  event_types:
+    - Goal
+    - Assist
+    - Yellow Card
+    - Red Card
+    - Substitution
+    - Penalty
+    - Own Goal
+    - Save
+
+  event_outcomes:
+    - Successful
+    - Unsuccessful
+    - Awarded
+    - Missed
+    - Completed
+
+  referee_roles:
+    - Referee
+    - Assistant Referee
+    - Fourth Official
+    - VAR Official
+
+  ticket_categories:
+    - Standard
+    - Premium
+    - VIP
+    - Hospitality
+    - Family
+
+  platform_types:
+    - Television
+    - Streaming
+    - Mobile App
+    - Web
+    - Radio
+
+  regions:
+    - Asia
+    - Africa
+    - Europe
+    - North America
+    - South America
+    - Oceania
+    - Global
+
+  sponsor_categories:
+    - Sportswear
+    - Airline
+    - Banking
+    - Technology
+    - Beverage
+    - Automotive
+    - Telecom
+
+pricing_guidance:
+  Standard:
+    min_price: 25
+    max_price: 100
+
+  Premium:
+    min_price: 100
+    max_price: 250
+
+  VIP:
+    min_price: 250
+    max_price: 600
+
+  Hospitality:
+    min_price: 500
+    max_price: 1500
+
+  Family:
+    min_price: 15
+    max_price: 75
