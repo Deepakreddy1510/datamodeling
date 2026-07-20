@@ -1,0 +1,237 @@
+{
+  "base_event_rows": 10,
+  "date_span_days": 40,
+  "raw_table_row_counts": {
+    "load_customer_raw": 6,
+    "load_brand_raw": 6,
+    "load_collection_raw": 6,
+    "load_watch_product_raw": 6,
+    "load_warehouse_raw": 6,
+    "load_inventory_raw": 10,
+    "load_order_raw": 10,
+    "load_order_item_raw": 30,
+    "load_payment_raw": 10,
+    "load_shipment_raw": 10,
+    "load_return_request_raw": 10,
+    "load_warranty_claim_raw": 10
+  },
+  "table_row_counts": {
+    "load_customer_raw": 6,
+    "load_brand_raw": 6,
+    "load_collection_raw": 6,
+    "load_watch_product_raw": 6,
+    "load_warehouse_raw": 6,
+    "load_inventory_raw": 10,
+    "load_order_raw": 10,
+    "load_order_item_raw": 30,
+    "load_payment_raw": 10,
+    "load_shipment_raw": 10,
+    "load_return_request_raw": 10,
+    "load_warranty_claim_raw": 10,
+    "stg_customer": 6,
+    "stg_brand": 6,
+    "stg_collection": 6,
+    "stg_watch_product": 6,
+    "stg_warehouse": 6,
+    "stg_inventory": 10,
+    "stg_order": 10,
+    "stg_order_item": 30,
+    "stg_payment": 10,
+    "stg_shipment": 10,
+    "stg_return_request": 10,
+    "stg_warranty_claim": 10,
+    "dim_brand": 6,
+    "dim_warehouse": 6,
+    "dim_collection": 6,
+    "dim_customer": 6,
+    "dim_date": 6,
+    "dim_product": 6,
+    "fact_warranty_claim": 10,
+    "fact_return": 10,
+    "fact_inventory_snapshot": 10,
+    "fact_shipment": 10,
+    "fact_sales": 30,
+    "fact_payment": 10
+  },
+  "table_profiles": {
+    "load_customer_raw": {
+      "category": "master",
+      "target_rows": 6,
+      "mapped_staging_tables": [
+        "stg_customer"
+      ],
+      "business_keys": [
+        "customer_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_brand_raw": {
+      "category": "master",
+      "target_rows": 6,
+      "mapped_staging_tables": [
+        "stg_brand"
+      ],
+      "business_keys": [
+        "brand_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_collection_raw": {
+      "category": "master",
+      "target_rows": 6,
+      "mapped_staging_tables": [
+        "stg_collection"
+      ],
+      "business_keys": [
+        "collection_id",
+        "brand_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_watch_product_raw": {
+      "category": "master",
+      "target_rows": 6,
+      "mapped_staging_tables": [
+        "stg_watch_product"
+      ],
+      "business_keys": [
+        "product_id",
+        "brand_id",
+        "collection_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_warehouse_raw": {
+      "category": "master",
+      "target_rows": 6,
+      "mapped_staging_tables": [
+        "stg_warehouse"
+      ],
+      "business_keys": [
+        "warehouse_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_inventory_raw": {
+      "category": "event",
+      "target_rows": 10,
+      "mapped_staging_tables": [
+        "stg_inventory"
+      ],
+      "business_keys": [
+        "inventory_id",
+        "product_id",
+        "warehouse_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_order_raw": {
+      "category": "event",
+      "target_rows": 10,
+      "mapped_staging_tables": [
+        "stg_order"
+      ],
+      "business_keys": [
+        "order_id",
+        "customer_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_order_item_raw": {
+      "category": "detail",
+      "target_rows": 30,
+      "mapped_staging_tables": [
+        "stg_order_item"
+      ],
+      "business_keys": [
+        "order_item_id",
+        "order_id",
+        "product_id",
+        "warehouse_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_payment_raw": {
+      "category": "event",
+      "target_rows": 10,
+      "mapped_staging_tables": [
+        "stg_payment"
+      ],
+      "business_keys": [
+        "payment_id",
+        "order_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_shipment_raw": {
+      "category": "event",
+      "target_rows": 10,
+      "mapped_staging_tables": [
+        "stg_shipment"
+      ],
+      "business_keys": [
+        "shipment_id",
+        "order_id",
+        "warehouse_id",
+        "tracking_number"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_return_request_raw": {
+      "category": "event",
+      "target_rows": 10,
+      "mapped_staging_tables": [
+        "stg_return_request"
+      ],
+      "business_keys": [
+        "return_id",
+        "order_item_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    },
+    "load_warranty_claim_raw": {
+      "category": "event",
+      "target_rows": 10,
+      "mapped_staging_tables": [
+        "stg_warranty_claim"
+      ],
+      "business_keys": [
+        "warranty_claim_id",
+        "order_item_id"
+      ],
+      "payload_columns": [],
+      "required_payload_columns": [],
+      "has_source_payload": false
+    }
+  },
+  "relationships": [],
+  "quality_targets": {
+    "reuse_parent_entities": true,
+    "non_uniform_parent_distribution": true,
+    "multiple_children_per_parent_when_allowed": true,
+    "reconcile_derived_measures": true,
+    "respect_all_ddl_constraints": true
+  }
+}

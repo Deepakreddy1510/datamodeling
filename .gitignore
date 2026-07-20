@@ -1,19 +1,13 @@
-# Python
+# Python environment
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
 
-# Secrets / environment
+# Secrets
 .env
 .env.*
 !.env.example
-
-# Generated outputs
-output/
-*.xlsx
-*.xls
-*.csv
 
 # OS / editor
 .DS_Store
