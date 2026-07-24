@@ -8,7 +8,7 @@ Status: **passed_with_warnings**
 
 ## Warnings
 
-- Inferred fact table(s) not found by name or close equivalent: fact_delivery, fact_transaction
+- Inferred fact table(s) not found by name or close equivalent: fact_transaction
 
 ## Summary
 

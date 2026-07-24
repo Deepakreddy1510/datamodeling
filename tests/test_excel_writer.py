@@ -14,7 +14,6 @@ def test_write_excel_one_sheet_per_table(tmp_path):
     output = tmp_path / "synthetic.xlsx"
     write_excel(model, data, output)
     workbook = load_workbook(output)
-<<<<<<< HEAD
     assert workbook.sheetnames == ["Model_Summary", "customer"]
     summary = workbook["Model_Summary"]
     assert summary["A1"].value == "Synthetic Data Warehouse — Model Summary"
@@ -63,9 +62,3 @@ def test_write_excel_converts_uuid_and_blocks_formula_injection(tmp_path):
     sheet = workbook["demo"]
     assert sheet.cell(2, 1).value == "10000000-0000-4000-8000-000000000001"
     assert sheet.cell(2, 2).value.startswith("'=")
-=======
-    assert workbook.sheetnames == ["customer"]
-    sheet = workbook["customer"]
-    assert sheet.max_row == 101
-    assert sheet[1][0].value == "customer_id"
->>>>>>> personal/main

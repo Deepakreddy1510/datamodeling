@@ -12,11 +12,11 @@
 
 | Table | Rows Inserted |
 |---|---:|
-| load_customer_raw | 6 |
+| load_customer_raw | 5 |
 | load_brand_raw | 6 |
 | load_collection_raw | 6 |
-| load_watch_product_raw | 6 |
-| load_warehouse_raw | 6 |
+| load_watch_product_raw | 5 |
+| load_warehouse_raw | 5 |
 | load_inventory_raw | 10 |
 | load_order_raw | 10 |
 | load_order_item_raw | 30 |

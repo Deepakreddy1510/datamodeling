@@ -11,7 +11,7 @@ Return strict JSON only. Do not include markdown code fences, commentary, or exp
 
 ```json
 {
-  "business_description": "TimeCraft is an online watch shopping platform where customers browse watches, compare brands and collections, place orders, make payments, receive shipments, request returns, and raise warranty claims. The business wants better visibility into sales, customer behaviour, product demand, inventory availability, payment outcomes, shipment performance, returns, refunds, and warranty service.\n\n\nThe physical PostgreSQL data warehouse must include a complete raw/load layer.\nFor every source business entity, create a raw load table using the pattern load_<entity>_raw.\nThe model must include these layers in order: load/raw tables, staging tables, dimension tables, fact tables, and reporting views.\nEvery staging table must be sourced from a matching load_<entity>_raw table.\nDo not skip the raw/load layer.\nDo not create only staging, dimension, and fact tables.",
+  "business_description": "TimeCraft is an online watch shopping platform where customers browse watches, compare brands and collections, place orders, make payments, receive shipments, request returns, and raise warranty claims. The business wants better visibility into sales, customer behaviour, product demand, inventory availability, payment outcomes, shipment performance, returns, refunds, and warranty service.\n",
   "business_name": "TimeCraft Online Watch Store",
   "business_relationships": [
     {
@@ -104,10 +104,7 @@ Return strict JSON only. Do not include markdown code fences, commentary, or exp
     "Warranty service cost must not be negative",
     "Active status fields must be boolean values",
     "All child records must resolve to valid parent records",
-    "Fact foreign keys must resolve to valid dimension records",
-    "Raw/load tables are mandatory for warehouse validation.",
-    "Staging tables must preserve business keys and foreign keys from raw/load tables.",
-    "The generated warehouse must support raw/load to staging to dimension/fact lineage validation."
+    "Fact foreign keys must resolve to valid dimension records"
   ],
   "business_type": "Online Watch Retail and E-Commerce",
   "entity_attributes": {
@@ -247,13 +244,7 @@ Return strict JSON only. Do not include markdown code fences, commentary, or exp
     "Fact and dimension design",
     "Synthetic data generation support",
     "Excel output with sample synthetic data",
-    "PostgreSQL loading support",
-    "Raw/load PostgreSQL tables using load_<entity>_raw naming",
-    "Staging tables sourced directly from matching raw/load tables",
-    "Dimension tables loaded from staging master data",
-    "Fact tables loaded from staging transaction data",
-    "Reporting views built from dimensions and facts",
-    "Validation-ready warehouse with raw_load, staging, dimension, fact, and reporting layers"
+    "PostgreSQL loading support"
   ],
   "key_business_entities": [
     {
@@ -319,17 +310,7 @@ Return strict JSON only. Do not include markdown code fences, commentary, or exp
     "Customer purchase history analysis",
     "Sales and product performance reporting"
   ],
-  "model_purpose": "Create a data model that helps the business analyse customer orders, watch product sales, brand and collection performance, inventory availability, payment status, shipment outcomes, returns, refunds, and warranty claims. The model should support business reporting, operational analysis, synthetic data generation, Excel output, and PostgreSQL loading.\n\n\nThe physical PostgreSQL data warehouse must include a complete raw/load layer.\nFor every source business entity, create a raw load table using the pattern load_<entity>_raw.\nThe model must include these layers in order: load/raw tables, staging tables, dimension tables, fact tables, and reporting views.\nEvery staging table must be sourced from a matching load_<entity>_raw table.\nDo not skip the raw/load layer.\nDo not create only staging, dimension, and fact tables.",
-  "physical_model_requirements": [
-    "Create raw/load tables for every source entity using load_<entity>_raw naming.",
-    "Create staging tables using stg_<entity> naming.",
-    "Create dimension tables using dim_<entity> naming.",
-    "Create fact tables using fact_<process> naming.",
-    "Create reporting views for business reports.",
-    "Every stg_ table must have a matching load_ raw table source.",
-    "The DDL must contain load_ tables, stg_ tables, dim_ tables, fact_ tables, and reporting views.",
-    "Do not omit the raw/load layer from the PostgreSQL DDL."
-  ],
+  "model_purpose": "Create a data model that helps the business analyse customer orders, watch product sales, brand and collection performance, inventory availability, payment status, shipment outcomes, returns, refunds, and warranty claims. The model should support business reporting, operational analysis, synthetic data generation, Excel output, and PostgreSQL loading.\n",
   "reporting_requirements": [
     {
       "description": "Show daily order count, quantity sold, gross sales, discounts, net sales, and average order value.",
@@ -412,9 +393,9 @@ Return strict JSON only. Do not include markdown code fences, commentary, or exp
 
 ```json
 {
-  "ai_review_score": 86,
+  "ai_review_score": 87,
   "decision": "ready_for_generation",
-  "final_score": 95.8,
+  "final_score": 96.1,
   "formula": "final_score = 0.70 * rule_based_score + 0.30 * ai_review_score",
   "rule_based_score": 100
 }

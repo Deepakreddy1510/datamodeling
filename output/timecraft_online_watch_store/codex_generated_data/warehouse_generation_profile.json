@@ -2,11 +2,11 @@
   "base_event_rows": 10,
   "date_span_days": 40,
   "raw_table_row_counts": {
-    "load_customer_raw": 6,
+    "load_customer_raw": 5,
     "load_brand_raw": 6,
     "load_collection_raw": 6,
-    "load_watch_product_raw": 6,
-    "load_warehouse_raw": 6,
+    "load_watch_product_raw": 5,
+    "load_warehouse_raw": 5,
     "load_inventory_raw": 10,
     "load_order_raw": 10,
     "load_order_item_raw": 30,
@@ -16,11 +16,11 @@
     "load_warranty_claim_raw": 10
   },
   "table_row_counts": {
-    "load_customer_raw": 6,
+    "load_customer_raw": 5,
     "load_brand_raw": 6,
     "load_collection_raw": 6,
-    "load_watch_product_raw": 6,
-    "load_warehouse_raw": 6,
+    "load_watch_product_raw": 5,
+    "load_warehouse_raw": 5,
     "load_inventory_raw": 10,
     "load_order_raw": 10,
     "load_order_item_raw": 30,
@@ -28,11 +28,11 @@
     "load_shipment_raw": 10,
     "load_return_request_raw": 10,
     "load_warranty_claim_raw": 10,
-    "stg_customer": 6,
+    "stg_customer": 5,
     "stg_brand": 6,
     "stg_collection": 6,
-    "stg_watch_product": 6,
-    "stg_warehouse": 6,
+    "stg_watch_product": 5,
+    "stg_warehouse": 5,
     "stg_inventory": 10,
     "stg_order": 10,
     "stg_order_item": 30,
@@ -40,23 +40,24 @@
     "stg_shipment": 10,
     "stg_return_request": 10,
     "stg_warranty_claim": 10,
-    "dim_brand": 6,
-    "dim_warehouse": 6,
-    "dim_collection": 6,
-    "dim_customer": 6,
+    "dim_warehouse": 5,
+    "dim_product": 5,
     "dim_date": 6,
-    "dim_product": 6,
-    "fact_warranty_claim": 10,
+    "dim_brand": 6,
+    "dim_collection": 6,
+    "dim_order": 10,
+    "dim_customer": 5,
+    "fact_inventory": 10,
+    "fact_payment": 10,
     "fact_return": 10,
-    "fact_inventory_snapshot": 10,
-    "fact_shipment": 10,
-    "fact_sales": 30,
-    "fact_payment": 10
+    "fact_claim": 10,
+    "fact_delivery": 10,
+    "fact_sales": 10
   },
   "table_profiles": {
     "load_customer_raw": {
       "category": "master",
-      "target_rows": 6,
+      "target_rows": 5,
       "mapped_staging_tables": [
         "stg_customer"
       ],
@@ -96,7 +97,7 @@
     },
     "load_watch_product_raw": {
       "category": "master",
-      "target_rows": 6,
+      "target_rows": 5,
       "mapped_staging_tables": [
         "stg_watch_product"
       ],
@@ -111,7 +112,7 @@
     },
     "load_warehouse_raw": {
       "category": "master",
-      "target_rows": 6,
+      "target_rows": 5,
       "mapped_staging_tables": [
         "stg_warehouse"
       ],
@@ -226,7 +227,206 @@
       "has_source_payload": false
     }
   },
-  "relationships": [],
+  "relationships": [
+    {
+      "child_raw_table": "load_collection_raw",
+      "parent_raw_table": "load_brand_raw",
+      "child_staging_table": "stg_collection",
+      "parent_table": "stg_brand",
+      "child_columns": [
+        "brand_id"
+      ],
+      "parent_columns": [
+        "brand_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": false
+    },
+    {
+      "child_raw_table": "load_watch_product_raw",
+      "parent_raw_table": "load_brand_raw",
+      "child_staging_table": "stg_watch_product",
+      "parent_table": "stg_brand",
+      "child_columns": [
+        "brand_id"
+      ],
+      "parent_columns": [
+        "brand_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": false
+    },
+    {
+      "child_raw_table": "load_watch_product_raw",
+      "parent_raw_table": "load_collection_raw",
+      "child_staging_table": "stg_watch_product",
+      "parent_table": "stg_collection",
+      "child_columns": [
+        "collection_id",
+        "brand_id"
+      ],
+      "parent_columns": [
+        "collection_id",
+        "brand_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": false
+    },
+    {
+      "child_raw_table": "load_inventory_raw",
+      "parent_raw_table": "load_watch_product_raw",
+      "child_staging_table": "stg_inventory",
+      "parent_table": "stg_watch_product",
+      "child_columns": [
+        "product_id"
+      ],
+      "parent_columns": [
+        "product_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": true
+    },
+    {
+      "child_raw_table": "load_inventory_raw",
+      "parent_raw_table": "load_warehouse_raw",
+      "child_staging_table": "stg_inventory",
+      "parent_table": "stg_warehouse",
+      "child_columns": [
+        "warehouse_id"
+      ],
+      "parent_columns": [
+        "warehouse_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": true
+    },
+    {
+      "child_raw_table": "load_order_raw",
+      "parent_raw_table": "load_customer_raw",
+      "child_staging_table": "stg_order",
+      "parent_table": "stg_customer",
+      "child_columns": [
+        "customer_id"
+      ],
+      "parent_columns": [
+        "customer_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": true
+    },
+    {
+      "child_raw_table": "load_order_item_raw",
+      "parent_raw_table": "load_order_raw",
+      "child_staging_table": "stg_order_item",
+      "parent_table": "stg_order",
+      "child_columns": [
+        "order_id"
+      ],
+      "parent_columns": [
+        "order_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": true
+    },
+    {
+      "child_raw_table": "load_order_item_raw",
+      "parent_raw_table": "load_watch_product_raw",
+      "child_staging_table": "stg_order_item",
+      "parent_table": "stg_watch_product",
+      "child_columns": [
+        "product_id"
+      ],
+      "parent_columns": [
+        "product_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": true
+    },
+    {
+      "child_raw_table": "load_order_item_raw",
+      "parent_raw_table": "load_warehouse_raw",
+      "child_staging_table": "stg_order_item",
+      "parent_table": "stg_warehouse",
+      "child_columns": [
+        "warehouse_id"
+      ],
+      "parent_columns": [
+        "warehouse_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": true
+    },
+    {
+      "child_raw_table": "load_payment_raw",
+      "parent_raw_table": "load_order_raw",
+      "child_staging_table": "stg_payment",
+      "parent_table": "stg_order",
+      "child_columns": [
+        "order_id"
+      ],
+      "parent_columns": [
+        "order_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": false
+    },
+    {
+      "child_raw_table": "load_shipment_raw",
+      "parent_raw_table": "load_order_raw",
+      "child_staging_table": "stg_shipment",
+      "parent_table": "stg_order",
+      "child_columns": [
+        "order_id"
+      ],
+      "parent_columns": [
+        "order_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": false
+    },
+    {
+      "child_raw_table": "load_shipment_raw",
+      "parent_raw_table": "load_warehouse_raw",
+      "child_staging_table": "stg_shipment",
+      "parent_table": "stg_warehouse",
+      "child_columns": [
+        "warehouse_id"
+      ],
+      "parent_columns": [
+        "warehouse_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": true
+    },
+    {
+      "child_raw_table": "load_return_request_raw",
+      "parent_raw_table": "load_order_item_raw",
+      "child_staging_table": "stg_return_request",
+      "parent_table": "stg_order_item",
+      "child_columns": [
+        "order_item_id"
+      ],
+      "parent_columns": [
+        "order_item_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": false
+    },
+    {
+      "child_raw_table": "load_warranty_claim_raw",
+      "parent_raw_table": "load_order_item_raw",
+      "child_staging_table": "stg_warranty_claim",
+      "parent_table": "stg_order_item",
+      "child_columns": [
+        "order_item_id"
+      ],
+      "parent_columns": [
+        "order_item_id"
+      ],
+      "one_to_one": false,
+      "require_reuse": false
+    }
+  ],
   "quality_targets": {
     "reuse_parent_entities": true,
     "non_uniform_parent_distribution": true,
