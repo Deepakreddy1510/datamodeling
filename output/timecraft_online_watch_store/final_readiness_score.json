@@ -1,7 +1,7 @@
 {
-  "ai_review_score": 86,
+  "ai_review_score": 87,
   "decision": "ready_for_generation",
-  "final_score": 95.8,
+  "final_score": 96.1,
   "formula": "final_score = 0.70 * rule_based_score + 0.30 * ai_review_score",
   "rule_based_score": 100
 }

@@ -1,5 +1,4 @@
 import datetime
-<<<<<<< HEAD
 import json
 from decimal import Decimal
 from enum import Enum
@@ -41,18 +40,6 @@ def _excel_safe_value(value):
     if isinstance(value, datetime.datetime):
         if value.tzinfo is not None:
             return value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
-=======
-from pathlib import Path
-
-from openpyxl import Workbook
-
-
-def _excel_safe_value(value):
-    """Convert Python values into Excel-safe values."""
-    if isinstance(value, datetime.datetime):
-        if value.tzinfo is not None:
-            return value.replace(tzinfo=None)
->>>>>>> personal/main
         return value
 
     if isinstance(value, datetime.time):
@@ -60,7 +47,6 @@ def _excel_safe_value(value):
             return value.replace(tzinfo=None)
         return value
 
-<<<<<<< HEAD
     if isinstance(value, Decimal):
         return float(value)
 
@@ -188,11 +174,6 @@ def _write_summary(workbook, model, data):
     return worksheet
 
 
-=======
-    return value
-
-
->>>>>>> personal/main
 def write_excel(model, data, output_path):
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -200,17 +181,13 @@ def write_excel(model, data, output_path):
     workbook = Workbook()
     default_sheet = workbook.active
     workbook.remove(default_sheet)
-<<<<<<< HEAD
     _write_summary(workbook, model, data)
-=======
->>>>>>> personal/main
 
     for table in model.tables:
         worksheet = workbook.create_sheet(title=table.name[:31])
         headers = [column.name for column in table.columns]
         worksheet.append(headers)
 
-<<<<<<< HEAD
         rows = data.get(table.name, [])
         for row in rows:
             worksheet.append(
@@ -219,11 +196,3 @@ def write_excel(model, data, output_path):
         _style_table_sheet(worksheet, table, len(rows))
 
     workbook.save(path)
-=======
-        for row in data.get(table.name, []):
-            worksheet.append(
-                [_excel_safe_value(row.get(column.name)) for column in table.columns]
-            )
-
-    workbook.save(path)
->>>>>>> personal/main

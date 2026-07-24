@@ -1,194 +1,160 @@
 {
-  "ai_review_score": 86,
+  "ai_review_score": 87,
   "assumptions_needed": [
-    "Each watch product belongs to exactly one collection unless a Product Collection bridge is introduced.",
-    "A brand may have products not assigned to a collection only if the mandatory collection rule is relaxed.",
-    "Shipment Item will be introduced to allocate shipped and delivered quantities to order items.",
-    "Refunds will be modeled as separate financial transactions linked to a return request and an original payment.",
-    "Inventory represents one daily snapshot per product and warehouse.",
-    "All monetary values use one business currency unless currency_code is added.",
-    "Revenue is based on non-cancelled line net amounts, with refund treatment defined separately.",
-    "A successful payment means a captured or settled transaction rather than merely an authorised attempt.",
-    "Delivery eligibility for returns and warranties is determined at shipment-item level.",
-    "Dimension history will use explicitly chosen Type 1 or Type 2 behavior per descriptive attribute.",
-    "All operational timestamps use a defined common timezone and reporting dates use a specified business timezone.",
-    "Raw tables preserve source values and ingestion metadata without enforcing transformed business constraints."
+    "Each inventory row is an end-of-day snapshot uniquely identified by product, warehouse, and inventory date.",
+    "Order Item stores the point-in-time selling price and discount, independent of later product price changes.",
+    "Amounts use one business currency unless currency attributes are added.",
+    "Taxes and shipping charges are excluded from net order amount unless additional attributes and reconciliation rules are supplied.",
+    "Only successfully captured or settled payment transactions contribute to paid amount; failed, pending, voided, and authorized-only attempts do not.",
+    "Refund transactions are negative financial events and must link to the relevant return request where applicable.",
+    "An order item may be split across multiple shipments, requiring item-level shipped quantities.",
+    "Return and warranty reporting uses only approved, completed, or otherwise explicitly qualifying statuses.",
+    "A qualifying repeat purchase is a second or later non-cancelled order by the same customer.",
+    "Analytical date dimensions and fact structures may be inferred from the operational events without being manually listed."
   ],
   "business_rule_review": {
     "are_business_rules_clear": false,
     "missing_business_rules": [
-      "The sum of shipped quantities for an order item must not exceed its purchased quantity.",
-      "A shipment item must belong to the same order as its shipment.",
-      "A shipment warehouse must be consistent with the warehouse fulfilling its shipment items, or explicit cross-warehouse rules must be defined.",
-      "Return quantities accumulated across requests must not exceed the delivered quantity after accounting for rejected or cancelled returns.",
-      "Warranty eligibility must be calculated from an explicitly defined delivery date and warranty duration convention.",
-      "Refunds must reference an eligible return or other defined adjustment reason and must not exceed the refundable balance.",
-      "Payment outcomes must distinguish authorisation, capture, settlement, failure, cancellation, chargeback, and refund where applicable.",
-      "The sum of successful payment captures minus successful refunds must reconcile to the order's payable or retained amount under defined status rules.",
-      "Order cancellation and partial-cancellation behavior must be defined.",
+      "The sum of shipped quantities per order item must not exceed ordered quantity.",
+      "The sum of delivered quantities per order item must not exceed shipped quantity.",
+      "Cumulative approved or completed return quantity must not exceed delivered quantity.",
+      "Shipment warehouse should match the fulfilment warehouse for included order items unless transfer fulfilment is explicitly supported.",
+      "Order status, shipment status, payment status, return status, and claim status transition rules are required.",
+      "Payment amount sign and aggregation behavior must be defined by transaction type and status.",
+      "Order cancellation and partial cancellation effects on amounts, payments, inventory, and fulfilment must be defined.",
+      "Monetary currency, rounding scale, and tax and shipping-charge treatment must be defined.",
       "Inventory snapshot uniqueness and snapshot timing must be defined.",
-      "Allowed status transitions and terminal statuses must be defined.",
-      "Nullability, uniqueness, and validation rules for email, SKU, tracking number, and transaction reference must be defined.",
-      "Timezone, date boundary, rounding, and monetary precision rules must be defined."
+      "Warranty eligibility should identify the warranty start date, expiry calculation, and treatment of returns or replacement units.",
+      "Uniqueness rules are needed for SKU, transaction reference, tracking number where applicable, and customer email where business-required."
     ]
   },
   "entity_review": {
     "are_entities_enough": false,
     "missing_entities": [
       "Shipment Item",
-      "Refund or Payment Refund linkage",
-      "Date dimension for the explicitly required continuous calendar"
+      "Date dimension for the explicitly requested fact-and-dimension design",
+      "Address or Order Address if delivery geography and point-in-time customer addresses are required"
     ],
     "weak_entities": [
-      {
-        "entity": "Shipment",
-        "issue": "Its order-level grain cannot support item-level fulfilment, split shipment, or delivered-order-item validation."
-      },
-      {
-        "entity": "Payment",
-        "issue": "Payment attempts, captures, refunds, and their links to original transactions are not fully distinguished."
-      },
-      {
-        "entity": "Return Request",
-        "issue": "It combines request and refund outcome data and does not support multiple or failed refund transactions cleanly."
-      },
-      {
-        "entity": "Inventory",
-        "issue": "Snapshot grain, uniqueness, capture time, and inventory status derivation are insufficiently defined."
-      },
-      {
-        "entity": "Order",
-        "issue": "Currency, tax, shipping charges, cancellation timestamps, and financial adjustment treatment are unspecified."
-      },
-      {
-        "entity": "Customer",
-        "issue": "PII governance and historical address or profile behavior are unspecified."
-      }
+      "Shipment lacks item-level contents and shipped quantities.",
+      "Payment lacks currency and transaction lineage or external processor outcome details.",
+      "Return Request lacks received_date, completed_date, disposition, and explicit refund transaction linkage.",
+      "Inventory lacks explicit snapshot timestamp or snapshot type and a declared natural uniqueness constraint.",
+      "Warranty Claim lacks an explicit warranty eligibility or expiry basis and may need a serviced serial or unit identifier.",
+      "Watch Product represents a product/SKU but not an individually serialized watch, which may be required for unit-level warranty servicing."
     ]
   },
   "missing_items": [
     {
-      "issue": "Shipments relate only to orders, so the input cannot identify which order items or quantities were included in each shipment. This is essential for split and multi-warehouse fulfilment and for proving that a returned or warranty-claimed order item was delivered.",
+      "issue": "Shipments relate only to orders and warehouses. There is no relationship or intersection entity identifying which order items and quantities are included in each shipment. This makes partial, split, and multi-warehouse fulfilment ambiguous.",
       "priority": "Critical",
-      "recommendation": "Add a Shipment Item entity with shipment_id, order_item_id, shipped_quantity, delivered_quantity, and applicable fulfilment status. Define its keys and quantity rules.",
-      "section": "Shipment fulfilment"
+      "recommendation": "Add a Shipment Item entity with shipment_id, order_item_id, shipped_quantity, and optionally delivered_quantity. Define quantity reconciliation rules against the ordered and returned quantities.",
+      "section": "Fulfilment and Shipment Allocation"
     },
     {
-      "issue": "Refund details are stored on Return Request while Payment also permits a refunded transaction type. The authoritative refund event, partial-refund handling, and relationship to payment transactions are ambiguous.",
+      "issue": "Return and warranty rules depend on an order item being delivered, but delivery is recorded only at shipment level and no shipment-to-order-item relationship exists.",
+      "priority": "Critical",
+      "recommendation": "Derive item delivery through Shipment Item and define when an order item is partially or fully delivered and therefore eligible for returns or warranty claims.",
+      "section": "Delivery Eligibility"
+    },
+    {
+      "issue": "Payment supports transaction types and statuses, while Return Request also stores refund information. The authoritative source for refunds and the treatment of authorizations, captures, voids, chargebacks, and multiple currencies are not defined.",
       "priority": "High",
-      "recommendation": "Add a Refund entity or explicitly model refunds as Payment transactions linked to the return request and original payment, including refund identifier, amount, status, requested date, processed date, and transaction reference.",
-      "section": "Refund processing"
+      "recommendation": "Define payment transaction types, signed amount behavior, successful-settlement logic, refund linkage to return requests, and whether currency is fixed or must be stored on orders and transactions.",
+      "section": "Payment and Refund Semantics"
     },
     {
-      "issue": "Return rate, warranty claim rate, repeat purchases, delayed shipments, average order value, revenue, and payment outcome metrics lack exact numerators, denominators, qualifying statuses, and date attribution rules.",
+      "issue": "Multiple return requests may reference one order item, but no rule limits cumulative approved or received return quantity to the purchased or delivered quantity.",
       "priority": "High",
-      "recommendation": "Define each metric's grain, formula, qualifying statuses, date basis, treatment of cancellations and refunds, and whether revenue is gross, net, paid, shipped, or retained revenue.",
-      "section": "Reporting metric definitions"
+      "recommendation": "Add rules for cumulative return quantity, partial returns, cancellation, receipt of returned goods, approval, rejection, and refund eligibility.",
+      "section": "Returns"
     },
     {
-      "issue": "Status, type, category, segment, method, and channel attributes do not have controlled value sets or lifecycle transition rules.",
-      "priority": "Medium",
-      "recommendation": "Provide allowed values and valid transitions for order, inventory, collection, product, payment, shipment, return, warranty, and service statuses, plus controlled domains for transaction type, channel, method, segment, and product classifications.",
-      "section": "Business status domains"
-    },
-    {
-      "issue": "The currency and required precision and scale for monetary attributes are not specified.",
+      "issue": "Inventory is described as a dated record, but its exact grain, uniqueness, snapshot timing, and relationship to reservations, fulfilment, returns, and stock movements are not defined.",
       "priority": "High",
-      "recommendation": "State whether the platform is single-currency. Add currency_code where needed and define PostgreSQL numeric precision, rounding, tax, shipping-charge, and refund-allocation rules.",
-      "section": "Currency and monetary precision"
+      "recommendation": "Declare the grain as one product, warehouse, inventory date, and snapshot point; add a uniqueness rule and clarify whether inventory is snapshot-only or reconciled from stock movements.",
+      "section": "Inventory"
     },
     {
-      "issue": "Taxes, shipping charges, cancellation effects, and other adjustments are not represented, making the intended meaning of net_order_amount uncertain.",
-      "priority": "Medium",
-      "recommendation": "Define whether net order amount excludes or includes tax, delivery charges, and other adjustments, and add attributes or entities for financially material components.",
-      "section": "Order financial composition"
-    },
-    {
-      "issue": "The input mentions avoiding unnecessary dimension history but does not identify which attributes require historical tracking or which event-time versus current-state analyses are expected.",
-      "priority": "Medium",
-      "recommendation": "Specify SCD behavior for customer, product, brand, collection, and warehouse attributes, including effective dates, current-row indicators, and late-arriving dimension handling.",
-      "section": "Temporal and dimensional history"
-    },
-    {
-      "issue": "Raw/load tables are mandatory, but ingestion metadata, deduplication rules, source identifiers, load behavior, and rejected-record handling are not defined.",
-      "priority": "Medium",
-      "recommendation": "Define source_system, source_record_id, batch_id, ingestion timestamp, source extraction timestamp, record hash, file identifier, load operation, duplicate handling, and rejection or quarantine requirements.",
-      "section": "Raw load and audit metadata"
-    },
-    {
-      "issue": "Customer email, phone, and profile information are present, but privacy classification, access controls, retention, masking, consent, and deletion requirements are absent.",
+      "issue": "Return rate, warranty claim rate, repeat purchases, average selling price, average order value, delayed shipment, resolution time, and courier performance lack precise calculation definitions.",
       "priority": "High",
-      "recommendation": "Define PII classification, role-based access, masking or tokenisation, encryption expectations, retention periods, consent requirements, and subject-access or deletion handling.",
-      "section": "Security and privacy"
+      "recommendation": "Define numerator, denominator, date basis, qualifying statuses, aggregation grain, and treatment of cancellations, partial fulfilment, refunds, and multiple claims.",
+      "section": "Metric Definitions"
     },
     {
-      "issue": "Creation, update, source, and lineage audit attributes are not specified for staging, dimensional, and fact records.",
+      "issue": "Status, segment, category, channel, method, transaction type, and warehouse type attributes do not have controlled value sets or lifecycle transitions.",
       "priority": "Medium",
-      "recommendation": "Define standard audit columns and lineage requirements, including created_at, updated_at, batch_id, source_system, effective timestamps, and transformation-run identifiers.",
-      "section": "Auditability"
+      "recommendation": "Provide allowed values and valid transitions, or explicitly authorize inferred PostgreSQL check constraints and reference domains.",
+      "section": "Status and Reference Domains"
     },
     {
-      "issue": "Inventory is described as being recorded by product, warehouse, and date, but uniqueness, snapshot timing, intraday behavior, and treatment of missing snapshots are not explicit.",
+      "issue": "Customer email, phone, and location data are included, but privacy classification, retention, masking, access control, consent, deletion, and audit requirements are absent.",
+      "priority": "High",
+      "recommendation": "Define personal-data classification, permitted uses, retention and deletion rules, masking requirements, access roles, and minimum audit columns such as created_at and updated_at.",
+      "section": "Security, Privacy, and Audit"
+    },
+    {
+      "issue": "PostgreSQL is specified, but schema naming, PostgreSQL version, identifier conventions, monetary precision, timezone policy, indexing expectations, and history strategy are not stated.",
       "priority": "Medium",
-      "recommendation": "Declare the fact grain and uniqueness constraint, such as one end-of-day snapshot per product, warehouse, and inventory date, and define timezone and missing-snapshot behavior.",
-      "section": "Inventory grain"
+      "recommendation": "Specify or authorize assumptions for PostgreSQL version, schemas, naming, numeric precision, currency handling, timestamptz usage, indexes, surrogate keys, and slowly changing dimensions.",
+      "section": "Physical Database Requirements"
+    },
+    {
+      "issue": "Fifteen rows per table is insufficient to consistently demonstrate twelve months of activity, repeated customers, multiple order items, multiple warehouses, minority returns and claims, and useful report distributions.",
+      "priority": "Medium",
+      "recommendation": "Use table-specific row volumes or treat 15 as a minimum. Generate substantially more transaction rows while retaining a continuous date dimension.",
+      "section": "Synthetic Data Volume"
     }
   ],
   "platform_review": {
     "is_platform_clear": true,
     "missing_platform_details": [
       "PostgreSQL version",
-      "Schema names for raw, staging, dimension, fact, and reporting layers",
-      "Identifier naming and reserved-word handling for Order and Collection",
-      "Required extensions, partitioning strategy, indexing expectations, and deployment conventions",
-      "Timezone and collation settings",
-      "Numeric precision and currency storage standards",
-      "Incremental loading, upsert, rerun, and late-arriving-data behavior"
+      "Schema and naming conventions",
+      "Key generation strategy",
+      "Money and quantity precision",
+      "Currency policy",
+      "Date, timestamp, and timezone policy",
+      "Indexing and partitioning expectations",
+      "Audit and history strategy",
+      "Deployment and loading idempotency requirements"
     ]
   },
   "readiness_level": "High",
   "relationship_review": {
     "are_relationships_clear": false,
     "many_to_many_issues": [
-      "The many-to-many relationship between Shipment and Order Item is unresolved. Shipment Item is required to represent split shipments, multi-warehouse orders, and item-level delivery.",
-      "If one return request can result in multiple refund transactions, the Return Request to Payment or Refund relationship requires an explicit intersection or child transaction entity.",
-      "If a product may belong to multiple collections, the current collection_id attribute is insufficient; otherwise the rule that each product belongs to exactly one collection should be stated explicitly."
+      "The many-to-many relationship between shipments and order items is unresolved; Shipment Item is required for split and partial fulfilment.",
+      "Inventory appropriately resolves the product-to-warehouse relationship, but its dated snapshot grain and uniqueness are not explicit.",
+      "Order Item appropriately resolves the order-to-product relationship."
     ],
     "missing_relationships": [
-      "Shipment contains Shipment Items",
-      "Shipment Item fulfils an Order Item quantity",
-      "Return Request produces zero or more Refund transactions",
-      "Refund references the original Payment transaction",
-      "Return Request is processed only after delivery of the applicable Shipment Item quantity",
-      "Warranty Claim applies only after delivery of the applicable Shipment Item"
+      "Shipment to Order Item through Shipment Item",
+      "Return Request or refund event to the corresponding Payment refund transaction",
+      "Optional shipment destination or order delivery address relationship",
+      "Optional payment transaction to its preceding authorization, capture, or refund transaction"
     ]
   },
   "reporting_review": {
     "are_reporting_requirements_supported": false,
     "missing_reporting_details": [
-      "Exact report grains and aggregation levels",
-      "Authoritative date used by each report",
-      "Qualifying and excluded order, payment, shipment, return, and warranty statuses",
-      "Definition of revenue and average order value",
-      "Return-rate numerator, denominator, and time attribution",
-      "Warranty-claim-rate numerator, denominator, and time attribution",
-      "Repeat-purchase definition and observation window",
-      "Delayed-shipment threshold and treatment of undelivered overdue shipments",
-      "Courier performance calculation rules",
-      "Refund and cancellation treatment",
-      "Currency conversion requirements, if multiple currencies are allowed",
-      "Item-to-shipment allocation needed for fulfilment and delivery-based reporting"
+      "Shipment performance cannot be reliably attributed to individual order items without Shipment Item.",
+      "Return rate and warranty claim rate require explicit denominator and qualifying-status definitions.",
+      "Repeat purchase requires a customer-order sequencing and qualifying-order definition.",
+      "Payment reporting requires rules for attempts versus settled transactions and refunds.",
+      "Inventory reorder risk needs a defined formula and snapshot selection rule.",
+      "Courier performance needs defined measures, date basis, and treatment of open shipments.",
+      "Currency and tax treatment are unspecified, so revenue metrics are ambiguous if the business supports more than one currency or tax-inclusive pricing."
     ]
   },
   "semantic_status": "needs_improvement",
   "suggestions": [
-    "Resolve item-level shipment allocation before model generation because several delivery, return, warranty, and courier rules depend on it.",
-    "Separate return workflow state from financial refund transactions.",
-    "Add a metric dictionary defining grain, formula, date basis, qualifying statuses, and exclusions for every requested KPI.",
-    "Add controlled vocabularies and lifecycle transitions for statuses and categorical attributes.",
-    "Define a standard set of ingestion, lineage, audit, and data-quality columns for every warehouse layer.",
-    "Specify PII handling before generating physical DDL and synthetic customer data.",
-    "Clarify whether each product belongs to exactly one collection or can participate in multiple collections.",
-    "Define the intended grains of sales, inventory snapshot, payment transaction, shipment, return, and warranty facts."
+    "Add Shipment Item before generating conceptual, logical, or physical models.",
+    "Define metric semantics in business language rather than prescribing fact and dimension table names.",
+    "Add controlled vocabularies and lifecycle rules for all status and classification attributes.",
+    "Clarify whether the model covers a single currency, whether prices include tax, and whether shipping charges are part of order value.",
+    "Clarify whether warranties are managed at product level or for individually serialized purchased watches.",
+    "Treat the requested date dimension and analytical facts as inferable outputs once event grains and metric definitions are confirmed.",
+    "Increase synthetic transaction volumes or define 15 rows as a minimum rather than an exact count."
   ]
 }

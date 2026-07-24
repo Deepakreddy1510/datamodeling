@@ -54,18 +54,11 @@ CREATE TABLE fact_sales (
     assert "Final status: **passed" in (tmp_path / "validation_report.md").read_text(encoding="utf-8")
 
 
-<<<<<<< HEAD
 def test_phase2_runner_generation_engine_defaults_to_codex_cli(monkeypatch):
     monkeypatch.setattr("sys.argv", ["phase2_runner.py", "--yaml", "input.yaml"])
     args = phase2_runner.parse_args()
     assert args.generation_engine == "codex-cli"
     assert args.codex_timeout_seconds == 0
-=======
-def test_phase2_runner_generation_engine_defaults_to_python(monkeypatch):
-    monkeypatch.setattr("sys.argv", ["phase2_runner.py", "--yaml", "input.yaml"])
-    args = phase2_runner.parse_args()
-    assert args.generation_engine == "python"
->>>>>>> personal/main
 
 
 def test_phase2_runner_parses_codex_generation_options(monkeypatch):
@@ -74,7 +67,6 @@ def test_phase2_runner_parses_codex_generation_options(monkeypatch):
     assert args.generation_engine == "codex-cli"
     assert args.allow_generator_fallback is True
     assert args.codex_timeout_seconds == 12
-<<<<<<< HEAD
 
 
 def test_phase2_codex_cli_elt_flow_uses_postgres_readback(tmp_path, monkeypatch):
@@ -300,5 +292,3 @@ def test_phase1_resolution_does_not_cross_use_case_output_directories(tmp_path):
     isolated.mkdir()
     with pytest.raises(FileNotFoundError):
         phase2_runner.resolve_phase1_output(None, isolated)
-=======
->>>>>>> personal/main

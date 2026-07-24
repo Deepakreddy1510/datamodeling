@@ -211,7 +211,6 @@ CREATE TABLE enum_array_check (
     assert check.operator == "IN"
     assert check.column == "status"
     assert check.values == ["Scheduled", "Completed"]
-<<<<<<< HEAD
 
 
 def test_parse_create_table_like_including_all_generically():
@@ -281,5 +280,3 @@ CREATE TABLE child_entity (
 """)
     child = next(table for table in model.tables if table.name == "child_entity")
     assert child.foreign_keys[0].parent_columns == ["parent_id"]
-=======
->>>>>>> personal/main

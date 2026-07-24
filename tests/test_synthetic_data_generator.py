@@ -246,14 +246,10 @@ CREATE TABLE fact_payment (
     business_input = {"reference_data": {"payment_statuses": ["Successful", "Failed", "Pending", "Refunded"]}}
     data = generate_synthetic_data(model, rows_per_table=5, seed=3, business_input=business_input)
     assert {row["payment_status"] for row in data["fact_payment"]} <= set(business_input["reference_data"]["payment_statuses"])
-<<<<<<< HEAD
     customer_rows = len(data["load_customer_raw"])
     assert customer_rows < len(data["fact_payment"])
     assert len(data["stg_customer"]) == len(data["dim_customer"]) == customer_rows
     for i in range(customer_rows):
-=======
-    for i in range(5):
->>>>>>> personal/main
         raw = data["load_customer_raw"][i]
         stg = data["stg_customer"][i]
         dim = data["dim_customer"][i]
@@ -261,11 +257,7 @@ CREATE TABLE fact_payment (
         assert raw["email"] == stg["email"] == dim["email"]
         first, last = raw["customer_name"].split()[0].lower(), raw["customer_name"].split()[-1].lower()
         assert first in raw["email"] and last in raw["email"]
-<<<<<<< HEAD
     assert validate_generated_data(model, data, data["__expected_rows__"], business_input=business_input)["status"] == "passed"
-=======
-    assert validate_generated_data(model, data, 5, business_input=business_input)["status"] == "passed"
->>>>>>> personal/main
 
 
 def test_generic_semantic_styles_service_healthcare_banking_have_valid_types_and_fks():
@@ -457,7 +449,6 @@ CREATE TABLE typed_sports_regression (
             if isinstance(value, str):
                 assert not value.startswith("Synthetic Global Football")
     assert validate_generated_data(model, data, 20)["status"] == "passed"
-<<<<<<< HEAD
 
 
 def test_python_engine_aligns_generic_raw_json_payloads_to_staging():
@@ -492,5 +483,3 @@ CREATE TABLE fact_activity (
         assert raw["source_payload"]["account_name"] == staging["account_name"]
         assert raw["source_payload"]["status"] == staging["status"]
     assert data["__stats__"]["raw_payload_alignment_events"] == ["load_account_raw -> stg_account"]
-=======
->>>>>>> personal/main
